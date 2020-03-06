@@ -30,3 +30,4 @@ jobs:
         env:
           DOCKER_CLI_EXPERIMENTAL: enabled
           TAG: ${{ steps.tagName.outputs.tag }}
+          IMAGE_TAG: ${{ steps.tagName.outputs.tag }}

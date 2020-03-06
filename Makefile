@@ -9,6 +9,7 @@ IMAGE ?= scaleway-cloud-controller-manager
 FULL_IMAGE ?= $(REGISTRY)/$(IMAGE)
 
 TAG ?= $(shell git rev-parse HEAD)
+IMAGE_TAG ?= $(shell git rev-parse HEAD)
 
 DOCKER_CLI_EXPERIMENTAL ?= enabled
 
@@ -34,12 +35,12 @@ compile:
 .PHONY: docker-build
 docker-build:
 	@echo "Building scaleway-cloud-controller-manager for ${ARCH}"
-	docker build . --platform=linux/$(ARCH) --build-arg ARCH=$(ARCH) --build-arg TAG=$(TAG) -f Dockerfile -t ${FULL_IMAGE}:${TAG}-$(ARCH)
+	docker build . --platform=linux/$(ARCH) --build-arg ARCH=$(ARCH) --build-arg TAG=$(TAG) -f Dockerfile -t ${FULL_IMAGE}:${IMAGE_TAG}-$(ARCH)
 
 .PHONY: docker-buildx-all
 docker-buildx-all:
-	@echo "Making release for tag $(TAG)"
-	docker buildx build --platform=$(ALL_PLATFORM) --push -t $(FULL_IMAGE):$(TAG) .
+	@echo "Making release for tag $(IMAGE_TAG)"
+	docker buildx build --build-arg TAG=$(TAG) --platform=$(ALL_PLATFORM) --push -t $(FULL_IMAGE):$(IMAGE_TAG) .
 
 ## Release
 .PHONY: release

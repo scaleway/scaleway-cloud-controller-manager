@@ -31,4 +31,5 @@ jobs:
         run: make release
         env:
           DOCKER_CLI_EXPERIMENTAL: enabled
-          TAG: ${{ steps.extract_branch.outputs.branch }}
+          TAG: ${{ env.GITHUB_SHA }}
+          IMAGE_TAG: ${{ steps.extract_branch.outputs.branch }}
