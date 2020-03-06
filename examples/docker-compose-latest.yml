@@ -1,0 +1,24 @@
+# Here is an example about how to run cloud-controller-manager with docker-compose. This is a template!
+# To generate an access/secret, see https://www.scaleway.com/en/docs/generate-an-api-token/
+version: '3.3'
+
+services:
+  ccm:
+    image: scaleway/scaleway-cloud-controller-manager:latest
+    volumes:
+      # Edit path to your kubeconfig
+      # On kubeadm master node, kubeconfig is located on /etc/kubernetes/admin.conf
+      - /etc/kubernetes/admin.conf:/kubeconfig.yaml
+    args:
+      - --kubeconfig=/kubeconfig.yaml
+      - --cloud-provider=scaleway
+      - --leader-elect=true
+      - --allow-untagged-cloud
+    restart: always
+    environment:
+      # Edit these variables:
+      SCW_ACCESS_KEY: "YOUR-ACCESS-KEY"
+      SCW_SECRET_KEY: "YOUR-SECRET-KEY"
+      SCW_DEFAULT_ORGANIZATION_ID: "YOUR-ORGANIZATION-ID"
+      # Region is where your loadbalancer will be created, ex: fr-par, nl-ams
+      SCW_DEFAULT_REGION: "fr-par"
