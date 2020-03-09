@@ -10,7 +10,7 @@ COPY cmd/ cmd/
 COPY scaleway/ scaleway/
 
 ARG TAG
-RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -a -ldflags "-extldflags '-static' -X github.com/scaleway/scaleway-cloud-controller-manager/scaleway.version=${TAG}" -o scaleway-cloud-controller-manager ./cmd/scaleway-cloud-controller-manager
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -a -ldflags "-w -s -X github.com/scaleway/scaleway-cloud-controller-manager/scaleway.version=${TAG}" -o scaleway-cloud-controller-manager ./cmd/scaleway-cloud-controller-manager
 
 FROM scratch
 WORKDIR /
