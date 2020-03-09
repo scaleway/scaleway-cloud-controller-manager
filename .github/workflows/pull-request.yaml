@@ -38,4 +38,4 @@ jobs:
       with:
         fetch-depth: 1
     - name: Building binary
-      run: GOARCH=${{ matrix.arch }} make build
+      run: GOARCH=${{ matrix.arch }} make compile

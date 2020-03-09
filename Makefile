@@ -28,7 +28,7 @@ test:
 fmt:
 	find . -type f -name "*.go" | grep -v "./vendor/*" | xargs gofmt -s -w -l
 
-.PHONY: build
+.PHONY: compile
 compile:
 	go build -v -o scaleway-cloud-controller-manager ./cmd/scaleway-cloud-controller-manager
 
