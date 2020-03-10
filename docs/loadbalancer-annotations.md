@@ -40,6 +40,7 @@ You can get a list of working annotation on in the Scaleway loadBalancer [docume
 | `service.beta.kubernetes.io/scw-loadbalancer-timeout-server` | maximum server connection inactivity time |
 | `service.beta.kubernetes.io/scw-loadbalancer-timeout-connect` | maximum initical server connection establishment time |
 | `service.beta.kubernetes.io/scw-loadbalancer-timeout-tunnel` | maximum tunnel inactivity time |
+| `service.beta.kubernetes.io/scw-loadbalancer-type` | load balancer offer type (lb-s, lb-gp-m, lb-gp-l). default: lb-s |
 | `service.beta.kubernetes.io/scw-loadbalancer-on-marked-down-action` | annotation that modifes what occurs when a backend server is marked down |
 
 Note:

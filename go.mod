@@ -4,7 +4,7 @@ go 1.12
 
 require (
 	github.com/google/uuid v1.1.1
-	github.com/scaleway/scaleway-sdk-go v1.0.0-beta.5.0.20200218181456-569954793561
+	github.com/scaleway/scaleway-sdk-go v1.0.0-beta.6.0.20200312094438-4e477f6a5660
 	golang.org/x/xerrors v0.0.0-20190717185122-a985d3407aa7
 	k8s.io/api v0.17.0
 	k8s.io/apiextensions-apiserver v0.17.0
