@@ -46,9 +46,11 @@ type syncController struct {
 }
 
 var (
-	splitRegexp  = regexp.MustCompile(`[:= ]+`)
-	labelsRegexp = regexp.MustCompile(`^(([A-Za-z0-9][-A-Za-z0-9_\\.]*)?[A-Za-z0-9])?$`)
-	labelsPrefix = "k8s.scaleway.com/"
+	splitRegexp      = regexp.MustCompile(`[:= ]+`)
+	labelsRegexp     = regexp.MustCompile(`^(([A-Za-z0-9][-A-Za-z0-9_\\.]*)?[A-Za-z0-9])?$`)
+	labelsPrefix     = "k8s.scaleway.com/"
+	taintsPrefix     = "k8s.scaleway.com/"
+	labelTaintPrefix = "taint="
 )
 
 func newSyncController(client *client, clientset *kubernetes.Clientset, cacheUpdateFrequency time.Duration) *syncController {
@@ -130,7 +132,20 @@ func (s *syncController) SyncNodesTags() {
 		patcher := NewNodePatcher(s.clientSet, nodeCopied)
 
 		nodeLabels := map[string]string{}
+		nodeTaints := []v1.Taint{}
 		for _, tag := range server.Server.Tags {
+			if strings.HasPrefix(tag, labelTaintPrefix) {
+				key, value, effect := tagTaintParser(tag)
+				if key == "" {
+					continue
+				}
+				nodeTaints = append(nodeTaints, v1.Taint{
+					Key:    key,
+					Value:  value,
+					Effect: effect,
+				})
+			}
+
 			key, value := tagLabelParser(tag)
 			if key == "" {
 				continue
@@ -151,6 +166,13 @@ func (s *syncController) SyncNodesTags() {
 			}
 		}
 
+		for _, taint := range node.Spec.Taints {
+			if !strings.HasPrefix(taint.Key, taintsPrefix) {
+				nodeTaints = append(nodeTaints, taint)
+			}
+		}
+
+		nodeCopied.Spec.Taints = nodeTaints
 		err = patcher.Patch()
 		if err != nil {
 			klog.Errorf("error patching service: %v", err)
@@ -239,5 +261,24 @@ func tagLabelParser(tag string) (key string, value string) {
 		}
 	}
 
+	return
+}
+
+func tagTaintParser(tag string) (key string, value string, effect v1.TaintEffect) {
+	taint := strings.TrimPrefix(tag, labelTaintPrefix)
+	taintParts := strings.Split(taint, ":")
+
+	switch v1.TaintEffect(taintParts[len(taintParts)-1]) {
+	case v1.TaintEffectNoExecute:
+		effect = v1.TaintEffectNoExecute
+	case v1.TaintEffectNoSchedule:
+		effect = v1.TaintEffectNoSchedule
+	case v1.TaintEffectPreferNoSchedule:
+		effect = v1.TaintEffectPreferNoSchedule
+	default:
+		return
+	}
+
+	key, value = tagLabelParser(strings.Join(taintParts[:len(taintParts)-1], ""))
 	return
 }
