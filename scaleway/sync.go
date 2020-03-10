@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog"
 )
 
@@ -43,7 +44,14 @@ type syncController struct {
 	nodeController    cache.Controller
 	serviceIndexer    cache.Indexer
 	serviceController cache.Controller
+	queue             workqueue.RateLimitingInterface
 }
+
+const (
+	exponentialBaseDelay  = time.Second * 1
+	exponentialMaxDelay   = time.Minute * 10
+	exponentialMaxRetries = 30
+)
 
 var (
 	splitRegexp      = regexp.MustCompile(`[:= ]+`)
@@ -57,7 +65,16 @@ func newSyncController(client *client, clientset *kubernetes.Clientset, cacheUpd
 	nodeListWatcher := cache.NewListWatchFromClient(clientset.CoreV1().RESTClient(), "nodes", v1.NamespaceAll, fields.Everything())
 	serviceListWatcher := cache.NewListWatchFromClient(clientset.CoreV1().RESTClient(), "services", v1.NamespaceAll, fields.Everything())
 
-	nodeIndexer, nodeController := cache.NewIndexerInformer(nodeListWatcher, &v1.Node{}, cacheUpdateFrequency, cache.ResourceEventHandlerFuncs{}, cache.Indexers{})
+	syncQueue := workqueue.NewRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(exponentialBaseDelay, exponentialMaxDelay))
+
+	nodeIndexer, nodeController := cache.NewIndexerInformer(nodeListWatcher, &v1.Node{}, cacheUpdateFrequency, cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			node, ok := obj.(*v1.Node)
+			if ok {
+				syncQueue.Add(node.Name)
+			}
+		},
+	}, cache.Indexers{})
 	serviceIndexer, serviceController := cache.NewIndexerInformer(serviceListWatcher, &v1.Service{}, cacheUpdateFrequency, cache.ResourceEventHandlerFuncs{}, cache.Indexers{})
 
 	return &syncController{
@@ -69,12 +86,14 @@ func newSyncController(client *client, clientset *kubernetes.Clientset, cacheUpd
 		nodeController:    nodeController,
 		serviceIndexer:    serviceIndexer,
 		serviceController: serviceController,
+		queue:             syncQueue,
 	}
 }
 
 func (s *syncController) Run(stopCh <-chan struct{}) {
 	go s.nodeController.Run(stopCh)
 	go s.serviceController.Run(stopCh)
+	defer s.queue.ShutDown()
 
 	if !cache.WaitForCacheSync(stopCh, s.nodeController.HasSynced) {
 		runtime.HandleError(fmt.Errorf("timed out waiting for node cache to sync"))
@@ -86,9 +105,136 @@ func (s *syncController) Run(stopCh <-chan struct{}) {
 		return
 	}
 
+	go wait.Until(s.runSyncQueue, time.Second, stopCh)
 	go wait.Until(s.SyncNodesTags, time.Minute*5, stopCh)
 	go wait.Until(s.SyncLBTags, time.Minute*5, stopCh)
 	<-stopCh
+}
+
+func (s *syncController) runSyncQueue() {
+	for s.processNextActionItem() {
+	}
+}
+
+func (s *syncController) processNextActionItem() bool {
+	key, quit := s.queue.Get()
+	if quit {
+		return false
+	}
+
+	defer s.queue.Done(key)
+
+	err := s.handleAction(key.(string))
+	if err != nil {
+		klog.Errorf("error syncing node: %v", err)
+		if s.queue.NumRequeues(key) < exponentialMaxRetries {
+			s.queue.AddRateLimited(key)
+			return true
+		}
+	}
+	s.queue.Forget(key)
+	return true
+}
+
+func (s *syncController) handleAction(nodeName string) error {
+	var err error
+	obj, exists, err := s.nodeIndexer.GetByKey(nodeName)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+
+	node, ok := obj.(*v1.Node)
+	if !ok {
+		err = fmt.Errorf("could not cast node to v1.Node")
+	}
+	return s.syncNodeTags(node)
+}
+
+func (s *syncController) syncNodeTags(node *v1.Node) error {
+	if node.Spec.ProviderID == "" {
+		klog.Warningf("provider ID is empty for node %s, ignoring", node.Name)
+		return nil
+	}
+	serverType, serverZone, serverID, err := ServerInfoFromProviderID(node.Spec.ProviderID)
+	if err != nil {
+		klog.Errorf("error getting server info from provider ID %s on node %s: %v", node.Spec.ProviderID, node.Name, err)
+		return fmt.Errorf("error getting server info from provider ID %s on node %s: %v", node.Spec.ProviderID, node.Name, err)
+	}
+	if serverType != InstanceTypeInstance {
+		klog.Warningf("server type %s is not supported yet for node %s, ignoring", serverType, node.Name)
+		return nil
+	}
+	scwZone, err := scw.ParseZone(serverZone)
+	if err != nil {
+		klog.Errorf("error parsing provider ID zone %s for node %s: %v", serverZone, node.Name, err)
+		return fmt.Errorf("error parsing provider ID zone %s for node %s: %v", serverZone, node.Name, err)
+	}
+	server, err := s.instanceAPI.GetServer(&instance.GetServerRequest{
+		Zone:     scwZone,
+		ServerID: serverID,
+	})
+	if err != nil {
+		return err
+	}
+
+	nodeCopied := node.DeepCopy()
+	if nodeCopied.ObjectMeta.Labels == nil {
+		nodeCopied.ObjectMeta.Labels = map[string]string{}
+	}
+
+	patcher := NewNodePatcher(s.clientSet, nodeCopied)
+
+	nodeLabels := map[string]string{}
+	nodeTaints := []v1.Taint{}
+	for _, tag := range server.Server.Tags {
+		if strings.HasPrefix(tag, labelTaintPrefix) {
+			key, value, effect := tagTaintParser(tag)
+			if key == "" {
+				continue
+			}
+			nodeTaints = append(nodeTaints, v1.Taint{
+				Key:    key,
+				Value:  value,
+				Effect: effect,
+			})
+		}
+
+		key, value := tagLabelParser(tag)
+		if key == "" {
+			continue
+		}
+
+		nodeLabels[key] = value
+		nodeCopied.Labels[key] = value
+	}
+
+	for key := range node.Labels {
+		if !strings.HasPrefix(key, labelsPrefix) {
+			continue
+		}
+
+		if _, ok := nodeLabels[key]; !ok {
+			// delete label
+			delete(nodeCopied.Labels, key)
+		}
+	}
+
+	for _, taint := range node.Spec.Taints {
+		if !strings.HasPrefix(taint.Key, taintsPrefix) {
+			nodeTaints = append(nodeTaints, taint)
+		}
+	}
+
+	nodeCopied.Spec.Taints = nodeTaints
+	err = patcher.Patch()
+	if err != nil {
+		klog.Errorf("error patching service: %v", err)
+		return err
+	}
+	return nil
 }
 
 func (s *syncController) SyncNodesTags() {
@@ -98,86 +244,7 @@ func (s *syncController) SyncNodesTags() {
 		if !ok {
 			continue
 		}
-		if node.Spec.ProviderID == "" {
-			klog.Warningf("provider ID is empty for node %s, ignoring", node.Name)
-			continue
-		}
-		serverType, serverZone, serverID, err := ServerInfoFromProviderID(node.Spec.ProviderID)
-		if err != nil {
-			klog.Errorf("error getting server info from provider ID %s on node %s: %v", node.Spec.ProviderID, node.Name, err)
-			continue
-		}
-		if serverType != InstanceTypeInstance {
-			klog.Warningf("server type %s is not supported yet for node %s, ignoring", serverType, node.Name)
-			continue
-		}
-		scwZone, err := scw.ParseZone(serverZone)
-		if err != nil {
-			klog.Errorf("error parsing provider ID zone %s for node %s: %v", serverZone, node.Name, err)
-			continue
-		}
-		server, err := s.instanceAPI.GetServer(&instance.GetServerRequest{
-			Zone:     scwZone,
-			ServerID: serverID,
-		})
-		if err != nil {
-			continue
-		}
-
-		nodeCopied := node.DeepCopy()
-		if nodeCopied.ObjectMeta.Labels == nil {
-			nodeCopied.ObjectMeta.Labels = map[string]string{}
-		}
-
-		patcher := NewNodePatcher(s.clientSet, nodeCopied)
-
-		nodeLabels := map[string]string{}
-		nodeTaints := []v1.Taint{}
-		for _, tag := range server.Server.Tags {
-			if strings.HasPrefix(tag, labelTaintPrefix) {
-				key, value, effect := tagTaintParser(tag)
-				if key == "" {
-					continue
-				}
-				nodeTaints = append(nodeTaints, v1.Taint{
-					Key:    key,
-					Value:  value,
-					Effect: effect,
-				})
-			}
-
-			key, value := tagLabelParser(tag)
-			if key == "" {
-				continue
-			}
-
-			nodeLabels[key] = value
-			nodeCopied.Labels[key] = value
-		}
-
-		for key := range node.Labels {
-			if !strings.HasPrefix(key, labelsPrefix) {
-				continue
-			}
-
-			if _, ok := nodeLabels[key]; !ok {
-				// delete label
-				delete(nodeCopied.Labels, key)
-			}
-		}
-
-		for _, taint := range node.Spec.Taints {
-			if !strings.HasPrefix(taint.Key, taintsPrefix) {
-				nodeTaints = append(nodeTaints, taint)
-			}
-		}
-
-		nodeCopied.Spec.Taints = nodeTaints
-		err = patcher.Patch()
-		if err != nil {
-			klog.Errorf("error patching service: %v", err)
-			continue
-		}
+		_ = s.syncNodeTags(node)
 	}
 }
 
