@@ -31,6 +31,25 @@ func TestSyncController_SyncNodeTags(t *testing.T) {
 
 }
 
+func TestTagTaintParser(t *testing.T) {
+	tagsTest := map[string][3]string{
+		"taint=":                    {"", "", ""},
+		"taint=word=word:NoExecute": {"k8s.scaleway.com/word", "word", "NoExecute"},
+		"taint=underscore_word=underscore_word:NoSchedule": {"k8s.scaleway.com/underscore_word", "underscore_word", "NoSchedule"},
+		"taint=dash-word=dash-word:PreferNoSchedule":       {"k8s.scaleway.com/dash-word", "dash-word", "PreferNoSchedule"},
+		"taint=dash-word=dash-word:foo":                    {"", "", ""},
+		"taint=dash-word=dash-word":                        {"", "", ""},
+	}
+	for tag, expected := range tagsTest {
+		t.Run(tag, func(t *testing.T) {
+			if key, value, effect := tagTaintParser(tag); key != expected[0] || value != expected[1] || string(effect) != expected[2] {
+				t.Errorf("tagLabelParser(\"%s\") got %s, %s, %s expected %s, %s, %s", tag, key, value, effect, expected[0], expected[1], expected[2])
+			}
+		})
+	}
+
+}
+
 func TestTagLabelParser(t *testing.T) {
 	tagsTest := map[string][2]string{
 		"":                  {"", ""},
