@@ -1,5 +1,7 @@
 FROM golang:1.13.8 as builder
 
+RUN apk update && apk add --no-cache git ca-certificates && update-ca-certificates
+
 WORKDIR /go/src/github.com/scaleway/scaleway-cloud-controller-manager
 
 COPY go.mod go.mod
@@ -14,5 +16,6 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -a -ldflags "-w
 
 FROM scratch
 WORKDIR /
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /go/src/github.com/scaleway/scaleway-cloud-controller-manager/scaleway-cloud-controller-manager .
 ENTRYPOINT ["/scaleway-cloud-controller-manager"]
