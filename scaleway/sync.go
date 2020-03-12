@@ -200,15 +200,15 @@ func (s *syncController) syncNodeTags(node *v1.Node) error {
 				Value:  value,
 				Effect: effect,
 			})
-		}
+		} else {
+			key, value := tagLabelParser(tag)
+			if key == "" {
+				continue
+			}
 
-		key, value := tagLabelParser(tag)
-		if key == "" {
-			continue
+			nodeLabels[key] = value
+			nodeCopied.Labels[key] = value
 		}
-
-		nodeLabels[key] = value
-		nodeCopied.Labels[key] = value
 	}
 
 	for key := range node.Labels {
