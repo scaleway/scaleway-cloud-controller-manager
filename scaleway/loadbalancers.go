@@ -103,6 +103,9 @@ const (
 	// (for instance "80,443")
 	serviceAnnotationLoadBalancerProxyProtocolV2 = "service.beta.kubernetes.io/scw-loadbalancer-proxy-protocol-v2"
 
+	// serviceAnnotationLoadBalancerType is the load balancer offer type
+	serviceAnnotationLoadBalancerType = "service.beta.kubernetes.io/scw-loadbalancer-type"
+
 	// serviceAnnotationLoadBalancerTimeoutServer is the maximum server connection inactivity time
 	// The default value is "10m". The duration are go's time.Duration (ex: "1s", "2m", "4h", ...)
 	serviceAnnotationLoadBalancerTimeoutServer = "service.beta.kubernetes.io/scw-loadbalancer-timeout-server"
@@ -138,6 +141,7 @@ type LoadBalancerAPI interface {
 	GetLb(req *scwlb.GetLbRequest, opts ...scw.RequestOption) (*scwlb.Lb, error)
 	CreateLb(req *scwlb.CreateLbRequest, opts ...scw.RequestOption) (*scwlb.Lb, error)
 	DeleteLb(req *scwlb.DeleteLbRequest, opts ...scw.RequestOption) error
+	MigrateLb(req *scwlb.MigrateLbRequest, opts ...scw.RequestOption) (*scwlb.Lb, error)
 	ListIPs(req *scwlb.ListIPsRequest, opts ...scw.RequestOption) (*scwlb.ListIPsResponse, error)
 	ListBackends(req *scwlb.ListBackendsRequest, opts ...scw.RequestOption) (*scwlb.ListBackendsResponse, error)
 	CreateBackend(req *scwlb.CreateBackendRequest, opts ...scw.RequestOption) (*scwlb.Backend, error)
@@ -467,6 +471,7 @@ func (l *loadbalancers) createLoadBalancer(ctx context.Context, clusterName stri
 		Description: "kubernetes service " + service.Name,
 		Tags:        tags,
 		IPID:        ipID,
+		Type:        getLoadBalancerType(service),
 	}
 
 	lb, err := l.api.CreateLb(&request)
@@ -726,6 +731,22 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 				}
 				return err
 			}
+		}
+	}
+
+	loadBalancerType := getLoadBalancerType(service)
+	if loadBalancerType != "" && strings.ToLower(loadbalancer.Type) != strings.ToLower(loadBalancerType) {
+		_, err := l.api.MigrateLb(&scwlb.MigrateLbRequest{
+			LbID: loadbalancer.ID,
+			Type: loadBalancerType,
+		})
+		if err != nil {
+			klog.Errorf("error updating lb: %v", err)
+			var respErr *scw.ResponseError
+			if xerrors.As(err, &respErr) {
+				return fmt.Errorf("Unable to migrate loadbalancer %s error %d with message %s", loadbalancer.ID, respErr.StatusCode, respErr.Message)
+			}
+			return err
 		}
 	}
 
@@ -1126,6 +1147,10 @@ func isPortInRange(r string, p int32) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+func getLoadBalancerType(service *v1.Service) string {
+	return service.Annotations[serviceAnnotationLoadBalancerType]
 }
 
 func getProxyProtocol(service *v1.Service, nodePort int32) (scwlb.ProxyProtocol, error) {
