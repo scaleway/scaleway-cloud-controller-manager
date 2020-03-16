@@ -77,3 +77,44 @@ You can now access your service via the provisioned load balancer
 ```bash
 curl -i http://51.15.224.149
 ```
+
+## Deploy a loadbalancer with specific IP
+
+Instead of creating a loadbalancer service with an ephemeral IP (which changes each time your delete/create the service), you can use a reserved loadbalancer address.
+
+_Warning: LoadBalancer ips are different from Instance ips. You cannot use an instance ip on a load-balancer and vice versa._
+
+To reserve a loadbalancer IP through API :
+```bash
+curl -X POST "https://api.scaleway.com/lb/v1/regions/$SCW_DEFAULT_REGION/ips" -H "X-Auth-Token: $SCW_SECRET_KEY" -H "Content-Type: application/json" \
+-d "{\"organization_id\":\"$SCW_DEFAULT_ORGANIZATION_ID\"} | jq -r .ip_address"
+```
+
+Now specify this IP address to spec.loadBalancerIP field of the service
+
+```yaml
+kind: Service
+apiVersion: v1
+metadata:
+  name: demo-nginx
+spec:
+  selector:
+    app: demo-nginx
+  type: LoadBalancer
+  ports:
+  - name: http
+    port: 80
+    targetPort: 80
+  loadBalancerIP: SCW.LB.IP.ADDR
+```
+
+## Convert an ephemeral IP into reserved IP
+
+It's possible to keep an ephemeral address (converting into a reserved address) by patching the associated service.
+
+```bash
+export CURRENT_EXTERNAL_IP=$(kubectl get svc $SERVICE_NAME -o json | jq -r .status.loadBalancer.ingress[0].ip)
+kubectl patch svc $SERVICE_NAME --type merge --patch "{\"spec\":{\"loadBalancerIP\": \"$CURRENT_EXTERNAL_IP\"}}"
+```
+
+This way, the ephemeral ip would not be deleted when the service will be deleted and could be reused in another service.
