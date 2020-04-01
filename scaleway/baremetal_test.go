@@ -276,8 +276,8 @@ func TestBaremetal_InstanceShutdownByProviderID(t *testing.T) {
 
 	t.Run("NotFound", func(t *testing.T) {
 		result, err := baremetal.InstanceShutdownByProviderID(context.TODO(), "scaleway://baremetal/fr-par-2/4d17aad4-c77e-4d95-a6e8-d7bf3f02d345")
-		AssertNoError(t, err)
-		AssertTrue(t, result)
+		Equals(t, err, cloudprovider.InstanceNotFound)
+		AssertFalse(t, result)
 	})
 }
 

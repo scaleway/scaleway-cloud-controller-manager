@@ -121,9 +121,6 @@ func (b *baremetal) InstanceExistsByProviderID(ctx context.Context, providerID s
 func (b *baremetal) InstanceShutdownByProviderID(ctx context.Context, providerID string) (bool, error) {
 	baremetalServer, err := b.getServerByProviderID(providerID)
 	if err != nil {
-		if err == cloudprovider.InstanceNotFound {
-			return true, nil
-		}
 		return false, err
 	}
 
