@@ -301,8 +301,8 @@ func TestInstances_InstanceShutdownByProviderID(t *testing.T) {
 
 	t.Run("NotFound", func(t *testing.T) {
 		result, err := instance.InstanceShutdownByProviderID(context.TODO(), "scaleway://instance/fr-par-1/b5c9fe34-4fa7-4902-86fd-8b68c230b0df")
-		AssertNoError(t, err)
-		AssertTrue(t, result)
+		Equals(t, err, cloudprovider.InstanceNotFound)
+		AssertFalse(t, result)
 	})
 }
 

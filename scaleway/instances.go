@@ -111,9 +111,6 @@ func (i *instances) InstanceExistsByProviderID(ctx context.Context, providerID s
 func (i *instances) InstanceShutdownByProviderID(ctx context.Context, providerID string) (bool, error) {
 	instanceServer, err := i.getServerByProviderID(providerID)
 	if err != nil {
-		if err == cloudprovider.InstanceNotFound {
-			return true, nil
-		}
 		return false, err
 	}
 
