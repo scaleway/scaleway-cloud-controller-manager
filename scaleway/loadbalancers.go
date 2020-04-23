@@ -94,12 +94,12 @@ const (
 	serviceAnnotationLoadBalancerSendProxyV2 = "service.beta.kubernetes.io/scw-loadbalancer-send-proxy-v2"
 
 	// serviceAnnotationLoadBalancerProxyProtocolV1 is the annotation that can enable the PROXY protocol V1
-	// The default value is "false" and the possible values are "false", "true" or a comma delimited list of the service port
+	// The possible values are "*" for all ports or a comma delimited list of the service port
 	// (for instance "80,443")
 	serviceAnnotationLoadBalancerProxyProtocolV1 = "service.beta.kubernetes.io/scw-loadbalancer-proxy-protocol-v1"
 
 	// serviceAnnotationLoadBalancerProxyProtocolV2 is the annotation that can enable the PROXY protocol V2
-	// The default value is "false" and the possible values are "false", "true" or a comma delimited list of the service port
+	// The possible values are "*" for all ports or a comma delimited list of the service port
 	// (for instance "80,443")
 	serviceAnnotationLoadBalancerProxyProtocolV2 = "service.beta.kubernetes.io/scw-loadbalancer-proxy-protocol-v2"
 
