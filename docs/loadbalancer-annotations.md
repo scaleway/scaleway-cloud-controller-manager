@@ -80,11 +80,11 @@ NB: Required when setting service.beta.kubernetes.io/scw-loadbalancer-health-che
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-proxy-protocol-v1`
 This is the annotation that can enable the PROXY protocol V1.
-The possible values are `*` for all ports or a comma delimited list of the service port (for instance `80,443`).
+The possible values are `false`, `true` or `*` for all ports or a comma delimited list of the service port (for instance `80,443`).
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-proxy-protocol-v2`
 This is the annotation that can enable the PROXY protocol V2.
-The possible values are `*` for all ports or a comma delimited list of the service port (for instance `80,443`).
+The possible values are `false`, `true` or `*` for all ports or a comma delimited list of the service port (for instance `80,443`).
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-type`
 This is the annotation to set the load balancer offer type.
