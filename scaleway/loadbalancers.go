@@ -94,12 +94,12 @@ const (
 	serviceAnnotationLoadBalancerSendProxyV2 = "service.beta.kubernetes.io/scw-loadbalancer-send-proxy-v2"
 
 	// serviceAnnotationLoadBalancerProxyProtocolV1 is the annotation that can enable the PROXY protocol V1
-	// The default value is "false" and the possible values are "false", "true" or a comma delimited list of the service port
+	// The possible values are "false", "true" or "*" for all ports or a comma delimited list of the service port
 	// (for instance "80,443")
 	serviceAnnotationLoadBalancerProxyProtocolV1 = "service.beta.kubernetes.io/scw-loadbalancer-proxy-protocol-v1"
 
 	// serviceAnnotationLoadBalancerProxyProtocolV2 is the annotation that can enable the PROXY protocol V2
-	// The default value is "false" and the possible values are "false", "true" or a comma delimited list of the service port
+	// The possible values are "false", "true" or "*" for all ports or a comma delimited list of the service port
 	// (for instance "80,443")
 	serviceAnnotationLoadBalancerProxyProtocolV2 = "service.beta.kubernetes.io/scw-loadbalancer-proxy-protocol-v2"
 
@@ -1130,6 +1130,10 @@ func getSendProxyV2(service *v1.Service, nodePort int32) (scwlb.ProxyProtocol, e
 }
 
 func isPortInRange(r string, p int32) (bool, error) {
+	boolValue, err := strconv.ParseBool(r)
+	if err == nil && r != "1" && r != "0" {
+		return boolValue, nil
+	}
 	if r == "*" {
 		return true, nil
 	}
