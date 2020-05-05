@@ -153,6 +153,10 @@ type LoadBalancerAPI interface {
 	CreateFrontend(req *scwlb.CreateFrontendRequest, opts ...scw.RequestOption) (*scwlb.Frontend, error)
 	UpdateFrontend(req *scwlb.UpdateFrontendRequest, opts ...scw.RequestOption) (*scwlb.Frontend, error)
 	DeleteFrontend(req *scwlb.DeleteFrontendRequest, opts ...scw.RequestOption) error
+	ListACLs(req *scwlb.ListACLsRequest, opts ...scw.RequestOption) (*scwlb.ListACLResponse, error)
+	CreateACL(req *scwlb.CreateACLRequest, opts ...scw.RequestOption) (*scwlb.ACL, error)
+	DeleteACL(req *scwlb.DeleteACLRequest, opts ...scw.RequestOption) error
+	UpdateACL(req *scwlb.UpdateACLRequest, opts ...scw.RequestOption) (*scwlb.ACL, error)
 }
 
 func newLoadbalancers(client *client) *loadbalancers {
@@ -695,6 +699,7 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 	}
 
 	for _, port := range service.Spec.Ports {
+		var frontendID string
 		// if the frontend exists for the port, update it
 		if frontend, ok := portFrontends[port.Port]; ok {
 			_, err := l.api.UpdateFrontend(&scwlb.UpdateFrontendRequest{
@@ -713,9 +718,11 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 				}
 				return err
 			}
+
+			frontendID = frontend.ID
 		} else { // if the frontend for this port does not exist, create it
 			timeoutClient := time.Minute * 10
-			_, err := l.api.CreateFrontend(&scwlb.CreateFrontendRequest{
+			resp, err := l.api.CreateFrontend(&scwlb.CreateFrontendRequest{
 				LbID:          loadbalancer.ID,
 				Name:          fmt.Sprintf("%s_tcp_%d", string(service.UID), port.Port),
 				InboundPort:   port.Port,
@@ -731,6 +738,75 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 				}
 				return err
 			}
+
+			frontendID = resp.ID
+		}
+
+		aclName := frontendID + "-lb-source-range"
+
+		acls, err := l.api.ListACLs(&scwlb.ListACLsRequest{
+			FrontendID: frontendID,
+			Name:       &aclName,
+		}, scw.WithAllPages())
+		if err != nil {
+			return err
+		}
+
+		if len(service.Spec.LoadBalancerSourceRanges) == 0 || len(acls.ACLs) != 1 {
+			for _, acl := range acls.ACLs {
+				err = l.api.DeleteACL(&scwlb.DeleteACLRequest{
+					ACLID: acl.ID,
+				})
+				if err != nil {
+					return err
+				}
+			}
+		}
+
+		if len(service.Spec.LoadBalancerSourceRanges) != 0 {
+			aclIPs := extractNodesInternalIps(nodes)
+			aclIPs = append(aclIPs, extractNodesExternalIps(nodes)...)
+			aclIPs = append(aclIPs, service.Spec.LoadBalancerSourceRanges...)
+			aclIPsPtr := make([]*string, len(aclIPs))
+			for i := range aclIPs {
+				aclIPsPtr[i] = &aclIPs[i]
+			}
+
+			if len(acls.ACLs) != 1 {
+				_, err := l.api.CreateACL(&scwlb.CreateACLRequest{
+					FrontendID: frontendID,
+					Name:       aclName,
+					Action: &scwlb.ACLAction{
+						Type: scwlb.ACLActionTypeDeny,
+					},
+					Index: 0,
+					Match: &scwlb.ACLMatch{
+						IPSubnet: aclIPsPtr,
+						Invert:   true,
+					},
+				})
+				if err != nil {
+					return err
+				}
+			} else if len(acls.ACLs) == 1 {
+				_, err := l.api.UpdateACL(&scwlb.UpdateACLRequest{
+					ACLID: acls.ACLs[0].ID,
+					Action: &scwlb.ACLAction{
+						Type: scwlb.ACLActionTypeDeny,
+					},
+					Index: 0,
+					Match: &scwlb.ACLMatch{
+						Invert:   true,
+						IPSubnet: aclIPsPtr,
+					},
+					Name: aclName,
+				})
+				if err != nil {
+					return err
+				}
+
+			}
+
 		}
 	}
 
