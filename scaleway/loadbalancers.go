@@ -468,6 +468,7 @@ func (l *loadbalancers) createLoadBalancer(ctx context.Context, clusterName stri
 	if scwCcmTags != "" {
 		tags = strings.Split(scwCcmTags, scwCcmTagsDelimiter)
 	}
+	tags = append(tags, "managed-by-scaleway-cloud-controller-manager")
 	lbName := l.GetLoadBalancerName(ctx, clusterName, service)
 
 	request := scwlb.CreateLbRequest{
