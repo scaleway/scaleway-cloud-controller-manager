@@ -162,7 +162,7 @@ func instanceAddresses(server *scwinstance.Server) []v1.NodeAddress {
 		addresses = append(
 			addresses,
 			v1.NodeAddress{Type: v1.NodeInternalIP, Address: *server.PrivateIP},
-			v1.NodeAddress{Type: v1.NodeInternalDNS, Address: fmt.Sprintf("%s.priv.cloud.scaleway.com", server.ID)},
+			v1.NodeAddress{Type: v1.NodeInternalDNS, Address: fmt.Sprintf("%s.priv.instances.scw.cloud", server.ID)},
 		)
 	}
 
@@ -170,7 +170,7 @@ func instanceAddresses(server *scwinstance.Server) []v1.NodeAddress {
 		addresses = append(
 			addresses,
 			v1.NodeAddress{Type: v1.NodeExternalIP, Address: server.PublicIP.Address.String()},
-			v1.NodeAddress{Type: v1.NodeExternalDNS, Address: fmt.Sprintf("%s.pub.cloud.scaleway.com", server.ID)},
+			v1.NodeAddress{Type: v1.NodeExternalDNS, Address: fmt.Sprintf("%s.pub.instances.scw.cloud", server.ID)},
 		)
 	}
 
