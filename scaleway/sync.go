@@ -266,9 +266,9 @@ func (s *syncController) SyncLBTags() {
 			continue
 		}
 
-		loadbalancer, err := s.lbAPI.GetLb(&lb.GetLbRequest{
+		loadbalancer, err := s.lbAPI.GetLB(&lb.GetLBRequest{
 			Region: region,
-			LbID:   loadBalancerID,
+			LBID:   loadBalancerID,
 		})
 		if err != nil {
 			klog.Errorf("error getting lb: %v", err)

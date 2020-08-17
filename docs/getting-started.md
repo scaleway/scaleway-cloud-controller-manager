@@ -101,7 +101,7 @@ The cluster is ready, you now have a working cluster, you can now deploy the `cl
 To deploy the `cloud-controller-manager` you will need :
 * Your access key.
 * Your secret key.
-* Your organization id.
+* Your organization or project id.
 * The Scaleway region.
 
 Create a `k8s-scaleway-secret.yml` file containing these informations.
@@ -118,7 +118,7 @@ stringData:
   SCW_ACCESS_KEY: "xxxxxxxxxxxxxxxx"
   SCW_SECRET_KEY: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
   SCW_DEFAULT_REGION: "fr-par"
-  SCW_DEFAULT_ORGANIZATION_ID: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxx"
+  SCW_DEFAULT_PROJECT_ID: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxx"
 ```
 
 Create the `secret` and deploy the controller

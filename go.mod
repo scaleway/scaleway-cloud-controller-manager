@@ -3,18 +3,16 @@ module github.com/scaleway/scaleway-cloud-controller-manager
 go 1.12
 
 require (
-	github.com/google/uuid v1.1.1
-	github.com/scaleway/scaleway-sdk-go v1.0.0-beta.6.0.20200312094438-4e477f6a5660
+	github.com/scaleway/scaleway-sdk-go v1.0.0-beta.6.0.20200814130755-648e470a1d42
 	golang.org/x/xerrors v0.0.0-20190717185122-a985d3407aa7
 	k8s.io/api v0.17.0
-	k8s.io/apiextensions-apiserver v0.17.0
+	k8s.io/apiextensions-apiserver v0.17.0 // indirect
 	k8s.io/apimachinery v0.17.0
-	k8s.io/apiserver v0.17.0
 	k8s.io/client-go v0.17.0
 	k8s.io/cloud-provider v0.17.0
 	k8s.io/component-base v0.17.0
 	k8s.io/klog v1.0.0
-	k8s.io/kube-controller-manager v0.17.0
+	k8s.io/kube-controller-manager v0.17.0 // indirect
 	k8s.io/kubernetes v1.17.0
 )
 

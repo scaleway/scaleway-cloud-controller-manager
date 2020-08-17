@@ -137,11 +137,11 @@ type loadbalancers struct {
 }
 
 type LoadBalancerAPI interface {
-	ListLbs(req *scwlb.ListLbsRequest, opts ...scw.RequestOption) (*scwlb.ListLbsResponse, error)
-	GetLb(req *scwlb.GetLbRequest, opts ...scw.RequestOption) (*scwlb.Lb, error)
-	CreateLb(req *scwlb.CreateLbRequest, opts ...scw.RequestOption) (*scwlb.Lb, error)
-	DeleteLb(req *scwlb.DeleteLbRequest, opts ...scw.RequestOption) error
-	MigrateLb(req *scwlb.MigrateLbRequest, opts ...scw.RequestOption) (*scwlb.Lb, error)
+	ListLBs(req *scwlb.ListLBsRequest, opts ...scw.RequestOption) (*scwlb.ListLBsResponse, error)
+	GetLB(req *scwlb.GetLBRequest, opts ...scw.RequestOption) (*scwlb.LB, error)
+	CreateLB(req *scwlb.CreateLBRequest, opts ...scw.RequestOption) (*scwlb.LB, error)
+	DeleteLB(req *scwlb.DeleteLBRequest, opts ...scw.RequestOption) error
+	MigrateLB(req *scwlb.MigrateLBRequest, opts ...scw.RequestOption) (*scwlb.LB, error)
 	ListIPs(req *scwlb.ListIPsRequest, opts ...scw.RequestOption) (*scwlb.ListIPsResponse, error)
 	ListBackends(req *scwlb.ListBackendsRequest, opts ...scw.RequestOption) (*scwlb.ListBackendsResponse, error)
 	CreateBackend(req *scwlb.CreateBackendRequest, opts ...scw.RequestOption) (*scwlb.Backend, error)
@@ -228,7 +228,7 @@ func (l *loadbalancers) EnsureLoadBalancer(ctx context.Context, clusterName stri
 		}
 	}
 
-	if lb.Status != scwlb.LbStatusReady {
+	if lb.Status != scwlb.LBStatusReady {
 		return nil, LoadBalancerNotReady
 	}
 
@@ -291,7 +291,7 @@ func (l *loadbalancers) EnsureLoadBalancerDeleted(ctx context.Context, clusterNa
 }
 
 //
-func (l *loadbalancers) deleteLoadBalancer(ctx context.Context, lb *scwlb.Lb, service *v1.Service) error {
+func (l *loadbalancers) deleteLoadBalancer(ctx context.Context, lb *scwlb.LB, service *v1.Service) error {
 	// remove loadbalancer annotation
 	if err := l.unannotateAndPatch(service); err != nil {
 		return err
@@ -305,12 +305,12 @@ func (l *loadbalancers) deleteLoadBalancer(ctx context.Context, lb *scwlb.Lb, se
 	// if loadBalancerIP is not set, it implies an ephemeral IP
 	releaseIP := service.Spec.LoadBalancerIP == ""
 
-	request := &scwlb.DeleteLbRequest{
-		LbID:      lb.ID,
+	request := &scwlb.DeleteLBRequest{
+		LBID:      lb.ID,
 		ReleaseIP: releaseIP,
 	}
 
-	err := l.api.DeleteLb(request)
+	err := l.api.DeleteLB(request)
 	if err != nil {
 		klog.Errorf("error creating load balancer: %v", err)
 		var respErr *scw.ResponseError
@@ -364,14 +364,14 @@ func extractNodesInternalIps(nodes []*v1.Node) []string {
 	return nodesList
 }
 
-func (l *loadbalancers) fetchLoadBalancer(ctx context.Context, clusterName string, service *v1.Service) (*scwlb.Lb, error) {
+func (l *loadbalancers) fetchLoadBalancer(ctx context.Context, clusterName string, service *v1.Service) (*scwlb.LB, error) {
 	if region, loadBalancerID, err := getLoadBalancerID(service); loadBalancerID != "" {
 		if err != nil {
 			return nil, err
 		}
 
-		resp, err := l.api.GetLb(&scwlb.GetLbRequest{
-			LbID:   loadBalancerID,
+		resp, err := l.api.GetLB(&scwlb.GetLBRequest{
+			LBID:   loadBalancerID,
 			Region: region,
 		})
 		if err != nil {
@@ -391,12 +391,12 @@ func (l *loadbalancers) fetchLoadBalancer(ctx context.Context, clusterName strin
 	return l.getLoadbalancerByName(ctx, service)
 }
 
-func (l *loadbalancers) getLoadbalancerByName(ctx context.Context, service *v1.Service) (*scwlb.Lb, error) {
+func (l *loadbalancers) getLoadbalancerByName(ctx context.Context, service *v1.Service) (*scwlb.LB, error) {
 	name := l.GetLoadBalancerName(ctx, "", service)
 
-	var loadbalancer *scwlb.Lb
+	var loadbalancer *scwlb.LB
 	for _, region := range scw.AllRegions {
-		resp, err := l.api.ListLbs(&scwlb.ListLbsRequest{
+		resp, err := l.api.ListLBs(&scwlb.ListLBsRequest{
 			Name:   &name,
 			Region: region,
 		}, scw.WithAllPages())
@@ -410,7 +410,7 @@ func (l *loadbalancers) getLoadbalancerByName(ctx context.Context, service *v1.S
 			return nil, err
 		}
 
-		for _, lb := range resp.Lbs {
+		for _, lb := range resp.LBs {
 			if lb.Name == name {
 				if loadbalancer != nil {
 					klog.Errorf("more than one loadbalancing matching the name %s", name)
@@ -435,7 +435,7 @@ func (l *loadbalancers) getLoadbalancerByName(ctx context.Context, service *v1.S
 	return loadbalancer, nil
 }
 
-func (l *loadbalancers) createLoadBalancer(ctx context.Context, clusterName string, service *v1.Service) (*scwlb.Lb, error) {
+func (l *loadbalancers) createLoadBalancer(ctx context.Context, clusterName string, service *v1.Service) (*scwlb.LB, error) {
 	scwCcmTagsDelimiter := os.Getenv(scwCcmTagsDelimiterEnv)
 	if scwCcmTagsDelimiter == "" {
 		scwCcmTagsDelimiter = ","
@@ -456,7 +456,7 @@ func (l *loadbalancers) createLoadBalancer(ctx context.Context, clusterName stri
 			return nil, IPAddressNotFound
 		}
 
-		if ipsResp.IPs[0].LbID != nil && *ipsResp.IPs[0].LbID != "" {
+		if ipsResp.IPs[0].LBID != nil && *ipsResp.IPs[0].LBID != "" {
 			return nil, IPAddressInUse
 		}
 
@@ -471,7 +471,7 @@ func (l *loadbalancers) createLoadBalancer(ctx context.Context, clusterName stri
 	tags = append(tags, "managed-by-scaleway-cloud-controller-manager")
 	lbName := l.GetLoadBalancerName(ctx, clusterName, service)
 
-	request := scwlb.CreateLbRequest{
+	request := scwlb.CreateLBRequest{
 		Name:        lbName,
 		Description: "kubernetes service " + service.Name,
 		Tags:        tags,
@@ -479,7 +479,7 @@ func (l *loadbalancers) createLoadBalancer(ctx context.Context, clusterName stri
 		Type:        getLoadBalancerType(service),
 	}
 
-	lb, err := l.api.CreateLb(&request)
+	lb, err := l.api.CreateLB(&request)
 	if err != nil {
 		klog.Errorf("error creating load balancer for service %s: %v", service.Name, err)
 		var respErr *scw.ResponseError
@@ -498,7 +498,7 @@ func (l *loadbalancers) createLoadBalancer(ctx context.Context, clusterName stri
 	return lb, nil
 }
 
-func (l *loadbalancers) annotateAndPatch(service *v1.Service, loadbalancer *scwlb.Lb) error {
+func (l *loadbalancers) annotateAndPatch(service *v1.Service, loadbalancer *scwlb.LB) error {
 	service = service.DeepCopy()
 	patcher := NewServicePatcher(l.client.kubernetes, service)
 
@@ -521,10 +521,10 @@ func (l *loadbalancers) unannotateAndPatch(service *v1.Service) error {
 	return patcher.Patch()
 }
 
-func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *scwlb.Lb, service *v1.Service, nodes []*v1.Node) error {
+func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *scwlb.LB, service *v1.Service, nodes []*v1.Node) error {
 	// List all frontends associated with the LB
 	respFrontends, err := l.api.ListFrontends(&scwlb.ListFrontendsRequest{
-		LbID: loadbalancer.ID,
+		LBID: loadbalancer.ID,
 	}, scw.WithAllPages())
 
 	if err != nil {
@@ -572,7 +572,7 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 
 	// List all backends associated with the LB
 	respBackends, err := l.api.ListBackends(&scwlb.ListBackendsRequest{
-		LbID: loadbalancer.ID,
+		LBID: loadbalancer.ID,
 	}, scw.WithAllPages())
 
 	if err != nil {
@@ -724,7 +724,7 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 		} else { // if the frontend for this port does not exist, create it
 			timeoutClient := time.Minute * 10
 			resp, err := l.api.CreateFrontend(&scwlb.CreateFrontendRequest{
-				LbID:          loadbalancer.ID,
+				LBID:          loadbalancer.ID,
 				Name:          fmt.Sprintf("%s_tcp_%d", string(service.UID), port.Port),
 				InboundPort:   port.Port,
 				BackendID:     portBackends[port.NodePort].ID,
@@ -813,8 +813,8 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 
 	loadBalancerType := getLoadBalancerType(service)
 	if loadBalancerType != "" && strings.ToLower(loadbalancer.Type) != strings.ToLower(loadBalancerType) {
-		_, err := l.api.MigrateLb(&scwlb.MigrateLbRequest{
-			LbID: loadbalancer.ID,
+		_, err := l.api.MigrateLB(&scwlb.MigrateLBRequest{
+			LBID: loadbalancer.ID,
 			Type: loadBalancerType,
 		})
 		if err != nil {
@@ -968,7 +968,7 @@ func (l *loadbalancers) makeUpdateHealthCheckRequest(backend *scwlb.Backend, nod
 	return request, nil
 }
 
-func (l *loadbalancers) makeCreateBackendRequest(loadbalancer *scwlb.Lb, nodePort int32, service *v1.Service, nodes []*v1.Node) (*scwlb.CreateBackendRequest, error) {
+func (l *loadbalancers) makeCreateBackendRequest(loadbalancer *scwlb.LB, nodePort int32, service *v1.Service, nodes []*v1.Node) (*scwlb.CreateBackendRequest, error) {
 	var serverIPs []string
 	if getForceInternalIP(service) {
 		serverIPs = extractNodesInternalIps(nodes)
@@ -976,7 +976,7 @@ func (l *loadbalancers) makeCreateBackendRequest(loadbalancer *scwlb.Lb, nodePor
 		serverIPs = extractNodesExternalIps(nodes)
 	}
 	request := &scwlb.CreateBackendRequest{
-		LbID:            loadbalancer.ID,
+		LBID:            loadbalancer.ID,
 		Name:            fmt.Sprintf("%s_tcp_%d", string(service.UID), nodePort),
 		ServerIP:        serverIPs,
 		ForwardProtocol: scwlb.ProtocolTCP,
