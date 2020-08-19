@@ -59,6 +59,10 @@ var (
 	labelsPrefix     = "k8s.scaleway.com/"
 	taintsPrefix     = "k8s.scaleway.com/"
 	labelTaintPrefix = "taint="
+
+	// K8S labels
+	labelNodeRoleExcludeBalancer      = "node.kubernetes.io/exclude-from-external-load-balancers"
+	labelNodeRoleExcludeBalancerValue = "managed-by-scaleway-ccm"
 )
 
 func newSyncController(client *client, clientset *kubernetes.Clientset, cacheUpdateFrequency time.Duration) *syncController {
@@ -201,9 +205,17 @@ func (s *syncController) syncNodeTags(node *v1.Node) error {
 				Effect: effect,
 			})
 		} else {
-			key, value := tagLabelParser(tag)
-			if key == "" {
-				continue
+			var key string
+			var value string
+			switch tag {
+			case labelNodeRoleExcludeBalancer:
+				key = labelNodeRoleExcludeBalancer
+				value = labelNodeRoleExcludeBalancerValue
+			default:
+				key, value = tagLabelParser(tag)
+				if key == "" {
+					continue
+				}
 			}
 
 			nodeLabels[key] = value
@@ -211,9 +223,16 @@ func (s *syncController) syncNodeTags(node *v1.Node) error {
 		}
 	}
 
-	for key := range node.Labels {
-		if !strings.HasPrefix(key, labelsPrefix) {
-			continue
+	for key, value := range node.Labels {
+		switch key {
+		case labelNodeRoleExcludeBalancer:
+			if value != labelNodeRoleExcludeBalancerValue {
+				continue
+			}
+		default:
+			if !strings.HasPrefix(key, labelsPrefix) {
+				continue
+			}
 		}
 
 		if _, ok := nodeLabels[key]; !ok {
