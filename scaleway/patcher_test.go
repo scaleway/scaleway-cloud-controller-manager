@@ -17,6 +17,7 @@ limitations under the License.
 package scaleway
 
 import (
+	"context"
 	"reflect"
 	"testing"
 
@@ -83,7 +84,7 @@ func TestKubePatcher_Patch(t *testing.T) {
 		clientset := fake.NewSimpleClientset()
 
 		service := newFakeService()
-		serviceAdded, _ := clientset.CoreV1().Services(metav1.NamespaceDefault).Create(service)
+		serviceAdded, _ := clientset.CoreV1().Services(metav1.NamespaceDefault).Create(context.Background(), service, metav1.CreateOptions{})
 		if val, ok := serviceAdded.ObjectMeta.Annotations["test-annotation"]; ok || val == "works" {
 			t.Errorf("Patch() bad test, service is already annotated")
 		}
@@ -95,7 +96,7 @@ func TestKubePatcher_Patch(t *testing.T) {
 			t.Errorf("Patch() got error while patching service")
 		}
 
-		serviceFinal, _ := clientset.CoreV1().Services(metav1.NamespaceDefault).Get(service.Name, metav1.GetOptions{})
+		serviceFinal, _ := clientset.CoreV1().Services(metav1.NamespaceDefault).Get(context.Background(), service.Name, metav1.GetOptions{})
 		if val, ok := serviceFinal.ObjectMeta.Annotations["test-annotation"]; !ok || val != "works" {
 			t.Errorf("Patch() service do not have annotation")
 		}
@@ -105,7 +106,7 @@ func TestKubePatcher_Patch(t *testing.T) {
 		clientset := fake.NewSimpleClientset()
 
 		node := newFakeNode()
-		nodeAdded, _ := clientset.CoreV1().Nodes().Create(node)
+		nodeAdded, _ := clientset.CoreV1().Nodes().Create(context.Background(), node, metav1.CreateOptions{})
 		if val, ok := nodeAdded.ObjectMeta.Annotations["test-annotation"]; ok || val == "works" {
 			t.Errorf("Patch() bad test, node is already annotated")
 		}
@@ -117,7 +118,7 @@ func TestKubePatcher_Patch(t *testing.T) {
 			t.Errorf("Patch() got error while patching node")
 		}
 
-		nodeFinal, _ := clientset.CoreV1().Nodes().Get(node.Name, metav1.GetOptions{})
+		nodeFinal, _ := clientset.CoreV1().Nodes().Get(context.Background(), node.Name, metav1.GetOptions{})
 		if val, ok := nodeFinal.ObjectMeta.Annotations["test-annotation"]; !ok || val != "works" {
 			t.Errorf("Patch() node do not have annotation")
 		}
