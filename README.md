@@ -24,9 +24,23 @@ Currently `scaleway-cloud-controller-manager` currently implements:
 
 ## Compatibility matrix
 
-|         | K8S 1.14 | K8S 1.15 | K8S 1.16 | K8S 1.17 |
+|         | K8S 1.15 | K8S 1.16 | K8S 1.17 | K8S 1.18 |
 |---------|----------|----------|----------|----------|
-|  v0.1.x | ✓        | ✓        | ✓        | ✓        |
+|  v0.1.x | ~        | ~        | ✓        | ~        |
+| v0.18.x | ~        | ~        | ~        | ✓        |
+
+- `✓` fully supported
+- `~` some features may not be supported (usually a Kubernetes version mismatch)
+
+### Branches and releases
+
+There is two types of branches:
+- `matser` which is the main branch
+- `release-x.y` which are the release branches. Each branch is built againt Kubernetes 1.y
+
+Most of the PRs on `master` will be backported to the supported `release-x.y` branches.
+
+Each release will be cut from the `release-x.y` branch, and will be in the form of `x.y.z` where `z` will be the Scaleway Cloud Controller patch version.
 
 ## Getting Started
 
