@@ -25,6 +25,7 @@ import (
 	scwbaremetal "github.com/scaleway/scaleway-sdk-go/api/baremetal/v1alpha1"
 	"github.com/scaleway/scaleway-sdk-go/scw"
 	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	cloudprovider "k8s.io/cloud-provider"
 )
 
@@ -299,4 +300,167 @@ func TestBaremetal_GetZoneByProviderID(t *testing.T) {
 	result, err := baremetal.GetZoneByProviderID(context.TODO(), "scaleway://baremetal/fr-par-2/53a6ca14-0d8d-4f2e-9887-2f1bcfba58ed")
 	AssertNoError(t, err)
 	Equals(t, expected, result)
+}
+
+func TestBaremetal_InstanceExists(t *testing.T) {
+	baremetal := newFakeBaremetal()
+
+	t.Run("Running by ID", func(t *testing.T) {
+		result, err := baremetal.InstanceExists(context.TODO(), &v1.Node{
+			Spec: v1.NodeSpec{
+				ProviderID: "scaleway://baremetal/fr-par-2/53a6ca14-0d8d-4f2e-9887-2f1bcfba58ed",
+			},
+		})
+		AssertNoError(t, err)
+		AssertTrue(t, result)
+	})
+
+	t.Run("Stopped by ID", func(t *testing.T) {
+		result, err := baremetal.InstanceExists(context.TODO(), &v1.Node{
+			Spec: v1.NodeSpec{
+				ProviderID: "scaleway://baremetal/fr-par-2/42d74979-992e-4650-9d05-31b834547d69",
+			},
+		})
+		AssertNoError(t, err)
+		AssertTrue(t, result)
+	})
+
+	t.Run("NotFound by ID", func(t *testing.T) {
+		result, err := baremetal.InstanceExists(context.TODO(), &v1.Node{
+			Spec: v1.NodeSpec{
+				ProviderID: "scaleway://baremetal/fr-par-2/4d17aad4-c77e-4d95-a6e8-d7bf3f02d345",
+			},
+		})
+		AssertNoError(t, err)
+		AssertFalse(t, result)
+	})
+	t.Run("Running by name", func(t *testing.T) {
+		result, err := baremetal.InstanceExists(context.TODO(), &v1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "bm-keen-feistel",
+			},
+		})
+		AssertNoError(t, err)
+		AssertTrue(t, result)
+	})
+
+	t.Run("Stopped by name", func(t *testing.T) {
+		result, err := baremetal.InstanceExists(context.TODO(), &v1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "bm-optimistic-cohen",
+			},
+		})
+		AssertNoError(t, err)
+		AssertTrue(t, result)
+	})
+
+	t.Run("NotFound by name", func(t *testing.T) {
+		result, err := baremetal.InstanceExists(context.TODO(), &v1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "dummy-name",
+			},
+		})
+		AssertNoError(t, err)
+		AssertFalse(t, result)
+	})
+
+}
+
+func TestBaremetal_InstanceShutdown(t *testing.T) {
+	baremetal := newFakeBaremetal()
+
+	t.Run("Running by ID", func(t *testing.T) {
+		result, err := baremetal.InstanceShutdown(context.TODO(), &v1.Node{
+			Spec: v1.NodeSpec{
+				ProviderID: "scaleway://baremetal/fr-par-2/53a6ca14-0d8d-4f2e-9887-2f1bcfba58ed",
+			},
+		})
+		AssertNoError(t, err)
+		AssertFalse(t, result)
+	})
+
+	t.Run("Stopped by ID", func(t *testing.T) {
+		result, err := baremetal.InstanceShutdown(context.TODO(), &v1.Node{
+			Spec: v1.NodeSpec{
+				ProviderID: "scaleway://baremetal/fr-par-2/42d74979-992e-4650-9d05-31b834547d69",
+			},
+		})
+		AssertNoError(t, err)
+		AssertTrue(t, result)
+	})
+
+	t.Run("NotFound by ID", func(t *testing.T) {
+		_, err := baremetal.InstanceShutdown(context.TODO(), &v1.Node{
+			Spec: v1.NodeSpec{
+				ProviderID: "scaleway://baremetal/fr-par-2/4d17aad4-c77e-4d95-a6e8-d7bf3f02d345",
+			},
+		})
+		AssertTrue(t, err == cloudprovider.InstanceNotFound)
+	})
+
+	t.Run("Running by name", func(t *testing.T) {
+		result, err := baremetal.InstanceShutdown(context.TODO(), &v1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "bm-keen-feistel",
+			},
+		})
+		AssertNoError(t, err)
+		AssertFalse(t, result)
+	})
+
+	t.Run("Stopped by name", func(t *testing.T) {
+		result, err := baremetal.InstanceShutdown(context.TODO(), &v1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "bm-optimistic-cohen",
+			},
+		})
+		AssertNoError(t, err)
+		AssertTrue(t, result)
+	})
+
+	t.Run("NotFound by name", func(t *testing.T) {
+		_, err := baremetal.InstanceShutdown(context.TODO(), &v1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "dummy-name",
+			},
+		})
+		AssertTrue(t, err == cloudprovider.InstanceNotFound)
+	})
+}
+
+func TestBaremetal_InstanceMetadata(t *testing.T) {
+	baremetal := newFakeBaremetal()
+
+	expectedAddresses := []v1.NodeAddress{
+		{Type: v1.NodeHostName, Address: "bm-keen-feistel"},
+		{Type: v1.NodeExternalIP, Address: "62.210.16.2"},
+		{Type: v1.NodeExternalDNS, Address: "53a6ca14-0d8d-4f2e-9887-2f1bcfba58ed.fr-par-2.baremetal.scw.cloud"},
+	}
+
+	providerID := "scaleway://baremetal/fr-par-2/53a6ca14-0d8d-4f2e-9887-2f1bcfba58ed"
+	offerName := "TEST1-L"
+
+	t.Run("By ID", func(t *testing.T) {
+		metadata, err := baremetal.InstanceMetadata(context.TODO(), &v1.Node{
+			Spec: v1.NodeSpec{
+				ProviderID: providerID,
+			},
+		})
+		AssertNoError(t, err)
+		Equals(t, expectedAddresses, metadata.NodeAddresses)
+		Equals(t, offerName, metadata.InstanceType)
+		Equals(t, providerID, metadata.ProviderID)
+	})
+
+	t.Run("By Name", func(t *testing.T) {
+		metadata, err := baremetal.InstanceMetadata(context.TODO(), &v1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "bm-keen-feistel",
+			},
+		})
+		AssertNoError(t, err)
+		Equals(t, expectedAddresses, metadata.NodeAddresses)
+		Equals(t, offerName, metadata.InstanceType)
+		Equals(t, providerID, metadata.ProviderID)
+	})
 }

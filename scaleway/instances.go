@@ -256,3 +256,74 @@ func (i *instances) getServerByProviderID(providerID string) (*scwinstance.Serve
 
 	return resp.Server, nil
 }
+
+// InstanceV2
+
+// InstanceExists returns true if the instance for the given node exists according to the cloud provider.
+// Use the node.name or node.spec.providerID field to find the node in the cloud provider.
+func (i *instances) InstanceExists(ctx context.Context, node *v1.Node) (bool, error) {
+	var err error
+
+	if node.Spec.ProviderID == "" {
+		_, err = i.getServerByName(node.Name)
+	} else {
+		_, err = i.getServerByProviderID(node.Spec.ProviderID)
+	}
+
+	if err == cloudprovider.InstanceNotFound {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
+// InstanceShutdown returns true if the instance is shutdown according to the cloud provider.
+// Use the node.name or node.spec.providerID field to find the node in the cloud provider.
+func (i *instances) InstanceShutdown(ctx context.Context, node *v1.Node) (bool, error) {
+	var instance *scwinstance.Server
+	var err error
+
+	if node.Spec.ProviderID == "" {
+		instance, err = i.getServerByName(node.Name)
+	} else {
+		instance, err = i.getServerByProviderID(node.Spec.ProviderID)
+	}
+
+	if err != nil {
+		return false, err
+	}
+
+	switch instance.State {
+	case scwinstance.ServerStateRunning, scwinstance.ServerStateStarting:
+		return false, nil
+	default:
+		return true, nil
+	}
+}
+
+// InstanceMetadata returns the instance's metadata. The values returned in InstanceMetadata are
+// translated into specific fields in the Node object on registration.
+// Use the node.name or node.spec.providerID field to find the node in the cloud provider.
+func (i *instances) InstanceMetadata(ctx context.Context, node *v1.Node) (*cloudprovider.InstanceMetadata, error) {
+	var instance *scwinstance.Server
+	var err error
+
+	if node.Spec.ProviderID == "" {
+		instance, err = i.getServerByName(node.Name)
+	} else {
+		instance, err = i.getServerByProviderID(node.Spec.ProviderID)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &cloudprovider.InstanceMetadata{
+		ProviderID:    BuildProviderID(InstanceTypeInstance, instance.Zone.String(), instance.ID),
+		InstanceType:  instance.CommercialType,
+		NodeAddresses: instanceAddresses(instance),
+	}, nil
+}

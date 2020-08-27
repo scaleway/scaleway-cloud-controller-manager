@@ -19,6 +19,7 @@ const (
 
 type Servers interface {
 	cloudprovider.Instances
+	cloudprovider.InstancesV2
 	GetZoneByProviderID(ctx context.Context, providerID string) (cloudprovider.Zone, error)
 	GetZoneByNodeName(ctx context.Context, nodeName types.NodeName) (cloudprovider.Zone, error)
 }
@@ -159,4 +160,49 @@ func (s *servers) GetZoneByNodeName(ctx context.Context, nodeName types.NodeName
 		return s.baremetal.GetZoneByNodeName(ctx, nodeName)
 	}
 	return zone, err
+}
+
+// Instances V2
+
+// InstanceExists returns true if the instance for the given node exists according to the cloud provider.
+// Use the node.name or node.spec.providerID field to find the node in the cloud provider.
+func (s *servers) InstanceExists(ctx context.Context, node *v1.Node) (bool, error) {
+	if node.Spec.ProviderID == "" {
+		exists, err := s.instances.InstanceExists(ctx, node)
+		if err != nil {
+			return false, err
+		}
+		if !exists {
+			return s.baremetal.InstanceExists(ctx, node)
+		}
+		return exists, nil
+	}
+	return s.getImplementationByProviderID(node.Spec.ProviderID).InstanceExists(ctx, node)
+}
+
+// InstanceShutdown returns true if the instance is shutdown according to the cloud provider.
+// Use the node.name or node.spec.providerID field to find the node in the cloud provider.
+func (s *servers) InstanceShutdown(ctx context.Context, node *v1.Node) (bool, error) {
+	if node.Spec.ProviderID == "" {
+		shutdown, err := s.instances.InstanceShutdown(ctx, node)
+		if err == cloudprovider.InstanceNotFound {
+			return s.baremetal.InstanceShutdown(ctx, node)
+		}
+		return shutdown, err
+	}
+	return s.getImplementationByProviderID(node.Spec.ProviderID).InstanceShutdown(ctx, node)
+}
+
+// InstanceMetadata returns the instance's metadata. The values returned in InstanceMetadata are
+// translated into specific fields in the Node object on registration.
+// Use the node.name or node.spec.providerID field to find the node in the cloud provider.
+func (s *servers) InstanceMetadata(ctx context.Context, node *v1.Node) (*cloudprovider.InstanceMetadata, error) {
+	if node.Spec.ProviderID == "" {
+		metadata, err := s.instances.InstanceMetadata(ctx, node)
+		if err == cloudprovider.InstanceNotFound {
+			return s.baremetal.InstanceMetadata(ctx, node)
+		}
+		return metadata, err
+	}
+	return s.getImplementationByProviderID(node.Spec.ProviderID).InstanceMetadata(ctx, node)
 }
