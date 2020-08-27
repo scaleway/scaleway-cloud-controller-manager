@@ -49,6 +49,7 @@ var (
 type cloud struct {
 	client         *client
 	instances      cloudprovider.Instances
+	instancesV2    cloudprovider.InstancesV2
 	zones          cloudprovider.Zones
 	loadbalancers  cloudprovider.LoadBalancer
 	syncController *syncController
@@ -82,6 +83,7 @@ func newCloud(config io.Reader) (cloudprovider.Interface, error) {
 	return &cloud{
 		client:        client,
 		instances:     newServers(client),
+		instancesV2:   newServers(client),
 		zones:         newZones(client),
 		loadbalancers: newLoadbalancers(client),
 	}, nil
@@ -114,6 +116,10 @@ func (c *cloud) LoadBalancer() (cloudprovider.LoadBalancer, bool) {
 
 func (c *cloud) Instances() (cloudprovider.Instances, bool) {
 	return c.instances, true
+}
+
+func (c *cloud) InstancesV2() (cloudprovider.InstancesV2, bool) {
+	return c.instancesV2, true
 }
 
 func (c *cloud) Zones() (cloudprovider.Zones, bool) {

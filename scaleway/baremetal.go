@@ -268,3 +268,79 @@ func (b *baremetal) getServerByProviderID(providerID string) (*scwbaremetal.Serv
 	}
 	return server, nil
 }
+
+// InstanceV2
+
+// InstanceExists returns true if the instance for the given node exists according to the cloud provider.
+// Use the node.name or node.spec.providerID field to find the node in the cloud provider.
+func (b *baremetal) InstanceExists(ctx context.Context, node *v1.Node) (bool, error) {
+	var err error
+
+	if node.Spec.ProviderID == "" {
+		_, err = b.getServerByName(node.Name)
+	} else {
+		_, err = b.getServerByProviderID(node.Spec.ProviderID)
+	}
+
+	if err == cloudprovider.InstanceNotFound {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
+// InstanceShutdown returns true if the instance is shutdown according to the cloud provider.
+// Use the node.name or node.spec.providerID field to find the node in the cloud provider.
+func (b *baremetal) InstanceShutdown(ctx context.Context, node *v1.Node) (bool, error) {
+	var bm *scwbaremetal.Server
+	var err error
+
+	if node.Spec.ProviderID == "" {
+		bm, err = b.getServerByName(node.Name)
+	} else {
+		bm, err = b.getServerByProviderID(node.Spec.ProviderID)
+	}
+
+	if err != nil {
+		return false, err
+	}
+
+	switch bm.Status {
+	case scwbaremetal.ServerStatusReady, scwbaremetal.ServerStatusStarting:
+		return false, nil
+	default:
+		return true, nil
+	}
+}
+
+// InstanceMetadata returns the instance's metadata. The values returned in InstanceMetadata are
+// translated into specific fields in the Node object on registration.
+// Use the node.name or node.spec.providerID field to find the node in the cloud provider.
+func (b *baremetal) InstanceMetadata(ctx context.Context, node *v1.Node) (*cloudprovider.InstanceMetadata, error) {
+	var bm *scwbaremetal.Server
+	var err error
+
+	if node.Spec.ProviderID == "" {
+		bm, err = b.getServerByName(node.Name)
+	} else {
+		bm, err = b.getServerByProviderID(node.Spec.ProviderID)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	offerName, err := b.getServerOfferName(bm)
+	if err != nil {
+		return nil, err
+	}
+
+	return &cloudprovider.InstanceMetadata{
+		ProviderID:    BuildProviderID(InstanceTypeBaremtal, bm.Zone.String(), bm.ID),
+		InstanceType:  offerName,
+		NodeAddresses: baremetalAddresses(bm),
+	}, nil
+}
