@@ -129,7 +129,7 @@ func (f *fakeInstanceAPI) ListServers(req *scwinstance.ListServersRequest, opts 
 func (f *fakeInstanceAPI) GetServer(req *scwinstance.GetServerRequest, opts ...scw.RequestOption) (*scwinstance.GetServerResponse, error) {
 	server, ok := f.Servers[req.ServerID]
 	if !ok {
-		return nil, &scw.ResponseError{StatusCode: 404}
+		return nil, &scw.ResourceNotFoundError{}
 	}
 
 	server.ID = req.ServerID

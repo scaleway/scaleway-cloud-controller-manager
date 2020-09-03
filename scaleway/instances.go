@@ -22,7 +22,6 @@ import (
 
 	scwinstance "github.com/scaleway/scaleway-sdk-go/api/instance/v1"
 	"github.com/scaleway/scaleway-sdk-go/scw"
-	"golang.org/x/xerrors"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	cloudprovider "k8s.io/cloud-provider"
@@ -203,13 +202,12 @@ func (i *instances) getServerByName(name string) (*scwinstance.Server, error) {
 		}, scw.WithAllPages())
 
 		if err != nil {
-			var respErr *scw.ResponseError
-			if xerrors.As(err, &respErr) {
-				if respErr.StatusCode == 404 || respErr.StatusCode == 400 {
-					continue
-				}
+			switch err.(type) {
+			case *scw.ResourceNotFoundError:
+				continue
+			default:
+				return nil, err
 			}
-			return nil, err
 		}
 
 		for _, srv := range resp.Servers {
@@ -245,13 +243,12 @@ func (i *instances) getServerByProviderID(providerID string) (*scwinstance.Serve
 		Zone:     scw.Zone(zone),
 	})
 	if err != nil {
-		var respErr *scw.ResponseError
-		if xerrors.As(err, &respErr) {
-			if respErr.StatusCode == 404 || respErr.StatusCode == 400 {
-				return nil, cloudprovider.InstanceNotFound
-			}
+		switch err.(type) {
+		case *scw.ResourceNotFoundError:
+			return nil, cloudprovider.InstanceNotFound
+		default:
+			return nil, err
 		}
-		return nil, err
 	}
 
 	return resp.Server, nil
