@@ -155,7 +155,7 @@ func (f *fakeBaremetalAPI) ListServers(req *scwbaremetal.ListServersRequest, opt
 func (f *fakeBaremetalAPI) GetServer(req *scwbaremetal.GetServerRequest, opts ...scw.RequestOption) (*scwbaremetal.Server, error) {
 	server, ok := f.Servers[req.ServerID]
 	if !ok {
-		return nil, &scw.ResponseError{StatusCode: 404}
+		return nil, &scw.ResourceNotFoundError{}
 	}
 
 	server.ID = req.ServerID
@@ -165,7 +165,7 @@ func (f *fakeBaremetalAPI) GetServer(req *scwbaremetal.GetServerRequest, opts ..
 func (f *fakeBaremetalAPI) GetOffer(req *scwbaremetal.GetOfferRequest, opts ...scw.RequestOption) (*scwbaremetal.Offer, error) {
 	offer, ok := f.Offers[req.OfferID]
 	if !ok {
-		return nil, &scw.ResponseError{StatusCode: 404}
+		return nil, &scw.ResourceNotFoundError{}
 	}
 
 	offer.ID = req.OfferID

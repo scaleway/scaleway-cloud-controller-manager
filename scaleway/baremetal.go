@@ -21,7 +21,6 @@ import (
 
 	scwbaremetal "github.com/scaleway/scaleway-sdk-go/api/baremetal/v1alpha1"
 	"github.com/scaleway/scaleway-sdk-go/scw"
-	"golang.org/x/xerrors"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	cloudprovider "k8s.io/cloud-provider"
@@ -191,11 +190,10 @@ func (b *baremetal) getServerOfferName(server *scwbaremetal.Server) (string, err
 		Zone:    server.Zone,
 	})
 	if err != nil {
-		var respErr *scw.ResponseError
-		if xerrors.As(err, &respErr) {
-			if respErr.StatusCode == 404 || respErr.StatusCode == 400 {
-				return "UNKNOWN", nil
-			}
+		switch err.(type) {
+		case *scw.ResourceNotFoundError:
+			return "UNKNOWN", nil
+		default:
 			return "", err
 		}
 	}
@@ -217,13 +215,12 @@ func (b *baremetal) getServerByName(name string) (*scwbaremetal.Server, error) {
 			Name: &name,
 		}, scw.WithAllPages())
 		if err != nil {
-			var respErr *scw.ResponseError
-			if xerrors.As(err, &respErr) {
-				if respErr.StatusCode == 404 || respErr.StatusCode == 400 {
-					continue
-				}
+			switch err.(type) {
+			case *scw.ResourceNotFoundError:
+				continue
+			default:
+				return nil, err
 			}
-			return nil, err
 		}
 
 		for _, srv := range resp.Servers {
@@ -258,13 +255,12 @@ func (b *baremetal) getServerByProviderID(providerID string) (*scwbaremetal.Serv
 		Zone:     scw.Zone(zone),
 	})
 	if err != nil {
-		var respErr *scw.ResponseError
-		if xerrors.As(err, &respErr) {
-			if respErr.StatusCode == 404 || respErr.StatusCode == 400 {
-				return nil, cloudprovider.InstanceNotFound
-			}
+		switch err.(type) {
+		case *scw.ResourceNotFoundError:
+			return nil, cloudprovider.InstanceNotFound
+		default:
+			return nil, err
 		}
-		return nil, err
 	}
 	return server, nil
 }

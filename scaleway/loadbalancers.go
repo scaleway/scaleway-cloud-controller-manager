@@ -19,7 +19,6 @@ package scaleway
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -27,7 +26,6 @@ import (
 
 	scwlb "github.com/scaleway/scaleway-sdk-go/api/lb/v1"
 	"github.com/scaleway/scaleway-sdk-go/scw"
-	"golang.org/x/xerrors"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/klog"
 )
@@ -312,13 +310,8 @@ func (l *loadbalancers) deleteLoadBalancer(ctx context.Context, lb *scwlb.LB, se
 
 	err := l.api.DeleteLB(request)
 	if err != nil {
-		klog.Errorf("error creating load balancer: %v", err)
-		var respErr *scw.ResponseError
-		if xerrors.As(err, &respErr) {
-			return fmt.Errorf("error on call DeleteLb with LbID %s: error %d with message %s", lb.ID, respErr.StatusCode, respErr.Message)
-		}
-
-		return err
+		klog.Errorf("error deleting load balancer %s: %v", lb.ID, err)
+		return fmt.Errorf("error deleting load balancer %s: %v", lb.ID, err)
 	}
 
 	return nil
@@ -375,13 +368,13 @@ func (l *loadbalancers) fetchLoadBalancer(ctx context.Context, clusterName strin
 			Region: region,
 		})
 		if err != nil {
-			var respErr *scw.ResponseError
-			if xerrors.As(err, &respErr) && respErr.StatusCode == http.StatusNotFound {
+			switch err.(type) {
+			case *scw.ResourceNotFoundError:
 				return nil, LoadBalancerNotFound
+			default:
+				klog.Errorf("an error occurred while fetching loadbalancer '%s/%s' for service '%s/%s'", region, loadBalancerID, service.Namespace, service.Name)
+				return nil, err
 			}
-
-			klog.Errorf("an error occurred while fetching loadbalancer '%s/%s' for service '%s/%s'", region, loadBalancerID, service.Namespace, service.Name)
-			return nil, err
 		}
 
 		return resp, nil
@@ -401,13 +394,12 @@ func (l *loadbalancers) getLoadbalancerByName(ctx context.Context, service *v1.S
 			Region: region,
 		}, scw.WithAllPages())
 		if err != nil {
-			var respErr *scw.ResponseError
-			if xerrors.As(err, &respErr) {
-				if respErr.StatusCode == 404 || respErr.StatusCode == 400 {
-					continue
-				}
+			switch err.(type) {
+			case *scw.ResourceNotFoundError:
+				continue
+			default:
+				return nil, err
 			}
-			return nil, err
 		}
 
 		for _, lb := range resp.LBs {
@@ -482,12 +474,7 @@ func (l *loadbalancers) createLoadBalancer(ctx context.Context, clusterName stri
 	lb, err := l.api.CreateLB(&request)
 	if err != nil {
 		klog.Errorf("error creating load balancer for service %s: %v", service.Name, err)
-		var respErr *scw.ResponseError
-		if xerrors.As(err, &respErr) {
-			return nil, fmt.Errorf("error on call CreateLb with name %s: error %d with message %s", lbName, respErr.StatusCode, respErr.Message)
-		}
-
-		return nil, fmt.Errorf("error on call CreateLb with name %s: %s", lbName, err.Error())
+		return nil, fmt.Errorf("error creating load balancer for service %s: %v", service.Name, err)
 	}
 
 	// annotate newly created loadBalancer
@@ -528,12 +515,7 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 	}, scw.WithAllPages())
 
 	if err != nil {
-		var respErr *scw.ResponseError
-		if xerrors.As(err, &respErr) {
-			return fmt.Errorf("error on call ListFrontends with LbID %s: error %d with message %s", loadbalancer.ID, respErr.StatusCode, respErr.Message)
-		}
-
-		return err
+		return fmt.Errorf("error updating load balancer %s: %v", loadbalancer.ID, err)
 	}
 
 	frontends := respFrontends.Frontends
@@ -558,12 +540,7 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 			})
 
 			if err != nil {
-				var respErr *scw.ResponseError
-				if xerrors.As(err, &respErr) {
-					return fmt.Errorf("error on call DeleteFrontend with FrontendID %s: error %d with message %s", frontend.ID, respErr.StatusCode, respErr.Message)
-				}
-
-				return err
+				return fmt.Errorf("error deleting frontend %s: %v", frontend.ID, err)
 			}
 		} else {
 			portFrontends[frontend.InboundPort] = frontend
@@ -576,12 +553,7 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 	}, scw.WithAllPages())
 
 	if err != nil {
-		var respErr *scw.ResponseError
-		if xerrors.As(err, &respErr) {
-			return fmt.Errorf("error on call ListBackends with LoadBalancerID %s: error %d with message %s", loadbalancer.ID, respErr.StatusCode, respErr.Message)
-		}
-
-		return err
+		return fmt.Errorf("error listing backend for load balancer %s: %v", loadbalancer.ID, err)
 	}
 
 	backends := respBackends.Backends
@@ -604,12 +576,7 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 			})
 
 			if err != nil {
-				var respErr *scw.ResponseError
-				if xerrors.As(err, &respErr) {
-					return fmt.Errorf("error on call DeleteBackend with BackendID %s: error %d with message %s", backend.ID, respErr.StatusCode, respErr.Message)
-				}
-
-				return err
+				return fmt.Errorf("error deleing backend %s: %v", backend.ID, err)
 			}
 		} else {
 			portBackends[backend.ForwardPort] = backend
@@ -629,13 +596,8 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 			updateBackendRequest.ForwardPort = port.NodePort
 			_, err = l.api.UpdateBackend(updateBackendRequest)
 			if err != nil {
-				klog.Errorf("error updating backend: %v", err)
-				var respErr *scw.ResponseError
-				if xerrors.As(err, &respErr) {
-					return fmt.Errorf("error on call UpdateBackend with BackendID %s: error %d with message %s", backend.ID, respErr.StatusCode, respErr.Message)
-				}
-
-				return err
+				klog.Errorf("error updating backend %s: %v", backend.ID, err)
+				return fmt.Errorf("error updating backend %s: %v", backend.ID, err)
 			}
 
 			updateHealthCheckRequest, err := l.makeUpdateHealthCheckRequest(backend, port.NodePort, service, nodes)
@@ -646,13 +608,8 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 
 			_, err = l.api.UpdateHealthCheck(updateHealthCheckRequest)
 			if err != nil {
-				klog.Errorf("error updating healthcheck: %v", err)
-				var respErr *scw.ResponseError
-				if xerrors.As(err, &respErr) {
-					return fmt.Errorf("error on call UpdateHealthCheck with BackendID %s: error %d with message %s", backend.ID, respErr.StatusCode, respErr.Message)
-				}
-
-				return err
+				klog.Errorf("error updating healthcheck for backend %s: %v", backend.ID, err)
+				return fmt.Errorf("error updating healthcheck for backend %s: %v", backend.ID, err)
 			}
 
 			var serverIPs []string
@@ -669,12 +626,8 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 
 			respBackend, err := l.api.SetBackendServers(setBackendServersRequest)
 			if err != nil {
-				klog.Errorf("error setting backend servers: %v", err)
-				var respErr *scw.ResponseError
-				if xerrors.As(err, &respErr) {
-					return fmt.Errorf("error on call SetBackendServers with BackendID %s: error %d with message %s", backend.ID, respErr.StatusCode, respErr.Message)
-				}
-				return err
+				klog.Errorf("error setting backend servers for backend %s: %v", backend.ID, err)
+				return fmt.Errorf("error setting backend servers for backend %s: %v", backend.ID, err)
 			}
 
 			portBackends[backend.ForwardPort] = respBackend
@@ -687,12 +640,8 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 
 			respBackend, err := l.api.CreateBackend(request)
 			if err != nil {
-				klog.Errorf("error creating backend: %v", err)
-				var respErr *scw.ResponseError
-				if xerrors.As(err, &respErr) {
-					return fmt.Errorf("error on call CreateBackend with LoadBalancerID %s: error %d with message %s", loadbalancer.ID, respErr.StatusCode, respErr.Message)
-				}
-				return err
+				klog.Errorf("error creating backend on load balancer %s: %v", loadbalancer.ID, err)
+				return fmt.Errorf("error creating backend on load balancer %s: %v", loadbalancer.ID, err)
 			}
 
 			portBackends[port.NodePort] = respBackend
@@ -712,12 +661,8 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 			})
 
 			if err != nil {
-				klog.Errorf("error updating frontend: %v", err)
-				var respErr *scw.ResponseError
-				if xerrors.As(err, &respErr) {
-					return fmt.Errorf("error on call UpdateFrontend with FrontendID %s and Backend ID %s: error %d with message %s", frontend.ID, portBackends[port.NodePort].ID, respErr.StatusCode, respErr.Message)
-				}
-				return err
+				klog.Errorf("error updating frontend %s: %v", frontend.ID, err)
+				return fmt.Errorf("error updating frontend %s: %v", frontend.ID, err)
 			}
 
 			frontendID = frontend.ID
@@ -732,12 +677,8 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 			})
 
 			if err != nil {
-				klog.Errorf("error creating frontend: %v", err)
-				var respErr *scw.ResponseError
-				if xerrors.As(err, &respErr) {
-					return fmt.Errorf("error on call CreateFronted with LbID %s and Backend ID %s: error %d with message %s", loadbalancer.ID, portBackends[port.NodePort].ID, respErr.StatusCode, respErr.Message)
-				}
-				return err
+				klog.Errorf("error creating frontend on load balancer %s: %v", loadbalancer.ID, err)
+				return fmt.Errorf("error creating frontend on load balancer %s: %v", loadbalancer.ID, err)
 			}
 
 			frontendID = resp.ID
@@ -818,12 +759,8 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 			Type: loadBalancerType,
 		})
 		if err != nil {
-			klog.Errorf("error updating lb: %v", err)
-			var respErr *scw.ResponseError
-			if xerrors.As(err, &respErr) {
-				return fmt.Errorf("Unable to migrate loadbalancer %s error %d with message %s", loadbalancer.ID, respErr.StatusCode, respErr.Message)
-			}
-			return err
+			klog.Errorf("error updating load balancer %s: %v", loadbalancer.ID, err)
+			return fmt.Errorf("error updating load balancer %s: %v", loadbalancer.ID, err)
 		}
 	}
 
