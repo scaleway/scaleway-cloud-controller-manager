@@ -12,7 +12,9 @@ COPY cmd/ cmd/
 COPY scaleway/ scaleway/
 
 ARG TAG
-RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -a -ldflags "-w -s -X github.com/scaleway/scaleway-cloud-controller-manager/scaleway.version=${TAG}" -o scaleway-cloud-controller-manager ./cmd/scaleway-cloud-controller-manager
+ARG COMMIT_SHA
+ARG BUILD_DATE
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -a -ldflags "-w -s -X github.com/scaleway/scaleway-cloud-controller-manager/scaleway.version=${TAG} -X github.com/scaleway/scaleway-cloud-controller-manager/scaleway.buildDate=${BUILD_DATE} github.com/scaleway/scaleway-cloud-controller-manager/scaleway.gitCommit=${COMMIT_SHA} " -o scaleway-cloud-controller-manager ./cmd/scaleway-cloud-controller-manager
 
 FROM scratch
 WORKDIR /
