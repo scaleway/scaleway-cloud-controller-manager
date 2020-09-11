@@ -18,6 +18,7 @@ package scaleway
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"time"
@@ -35,15 +36,12 @@ const (
 	cacheUpdateFrequency = time.Minute * 10
 
 	// optional fields
-	scwCcmUserAgent        = "SCW_CCM_USER_AGENT"
 	scwCcmPrefixEnv        = "SCW_CCM_PREFIX"
 	scwCcmTagsEnv          = "SCW_CCM_TAGS"
 	scwCcmTagsDelimiterEnv = "SCW_CCM_TAGS_DELIMITER"
-)
 
-var (
-	version   = "0.0.0-dirty"
-	userAgent = "scaleway/ccm (" + version + ")"
+	// extraUserAgentEnv is the environment variable that adds some string at the end of the user agent
+	extraUserAgentEnv = "EXTRA_USER_AGENT"
 )
 
 type cloud struct {
@@ -58,6 +56,11 @@ type cloud struct {
 func newCloud(config io.Reader) (cloudprovider.Interface, error) {
 	logger.SetLogger(logging)
 
+	userAgent := fmt.Sprintf("scaleway/ccm %s (%s)", ccmVersion, gitCommit)
+	if extraUA := os.Getenv(extraUserAgentEnv); extraUA != "" {
+		userAgent = userAgent + " " + extraUA
+	}
+
 	// Create a Scaleway client
 	// use theses env variable to set or overwrite profile values
 	// SCW_ACCESS_KEY
@@ -65,6 +68,7 @@ func newCloud(config io.Reader) (cloudprovider.Interface, error) {
 	// SCW_DEFAULT_ORGANIZATION_ID
 	// SCW_DEFAULT_REGION
 	// SCW_DEFAULT_ZONE
+
 	scwClient, err := scw.NewClient(
 		scw.WithUserAgent(userAgent),
 		scw.WithEnv(),
@@ -90,10 +94,6 @@ func newCloud(config io.Reader) (cloudprovider.Interface, error) {
 }
 
 func init() {
-	if ua, ok := os.LookupEnv(scwCcmUserAgent); ok {
-		userAgent = ua
-	}
-
 	cloudprovider.RegisterCloudProvider(providerName, func(config io.Reader) (cloudprovider.Interface, error) {
 		return newCloud(config)
 	})
