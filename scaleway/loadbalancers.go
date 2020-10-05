@@ -144,8 +144,9 @@ const (
 )
 
 type loadbalancers struct {
-	api    LoadBalancerAPI
-	client *client // for patcher
+	api           LoadBalancerAPI
+	client        *client // for patcher
+	defaultLBType string
 }
 
 type LoadBalancerAPI interface {
@@ -171,10 +172,15 @@ type LoadBalancerAPI interface {
 	UpdateACL(req *scwlb.UpdateACLRequest, opts ...scw.RequestOption) (*scwlb.ACL, error)
 }
 
-func newLoadbalancers(client *client) *loadbalancers {
+func newLoadbalancers(client *client, defaultLBType string) *loadbalancers {
+	lbType := "lb-s"
+	if defaultLBType != "" {
+		lbType = strings.ToLower(defaultLBType)
+	}
 	return &loadbalancers{
-		api:    scwlb.NewAPI(client.scaleway),
-		client: client,
+		api:           scwlb.NewAPI(client.scaleway),
+		client:        client,
+		defaultLBType: lbType,
 	}
 }
 
@@ -473,12 +479,17 @@ func (l *loadbalancers) createLoadBalancer(ctx context.Context, clusterName stri
 	tags = append(tags, "managed-by-scaleway-cloud-controller-manager")
 	lbName := l.GetLoadBalancerName(ctx, clusterName, service)
 
+	lbType := getLoadBalancerType(service)
+	if lbType != "" {
+		lbType = l.defaultLBType
+	}
+
 	request := scwlb.CreateLBRequest{
 		Name:        lbName,
 		Description: "kubernetes service " + service.Name,
 		Tags:        tags,
 		IPID:        ipID,
-		Type:        getLoadBalancerType(service),
+		Type:        lbType,
 	}
 
 	lb, err := l.api.CreateLB(&request)
@@ -769,7 +780,7 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 	}
 
 	loadBalancerType := getLoadBalancerType(service)
-	if loadBalancerType != "" && strings.ToLower(loadbalancer.Type) != strings.ToLower(loadBalancerType) {
+	if loadBalancerType != "" && strings.ToLower(loadbalancer.Type) != loadBalancerType {
 		_, err := l.api.MigrateLB(&scwlb.MigrateLBRequest{
 			LBID: loadbalancer.ID,
 			Type: loadBalancerType,
@@ -1193,7 +1204,7 @@ func isPortInRange(r string, p int32) (bool, error) {
 }
 
 func getLoadBalancerType(service *v1.Service) string {
-	return service.Annotations[serviceAnnotationLoadBalancerType]
+	return strings.ToLower(service.Annotations[serviceAnnotationLoadBalancerType])
 }
 
 func getProxyProtocol(service *v1.Service, nodePort int32) (scwlb.ProxyProtocol, error) {
