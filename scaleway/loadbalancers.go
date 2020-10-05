@@ -127,6 +127,20 @@ const (
 	// serviceAnnotationLoadBalancerUseHostname is the annotation that force the use of the LB hostname instead of the public IP.
 	// This is useful when it it needed to not bypass the LoadBalacer for traffic coming from the cluster
 	serviceAnnotationLoadBalancerUseHostname = "service.beta.kubernetes.io/scw-loadbalancer-use-hostname"
+
+	// serviceAnnotationLoadBalancerProtocolHTTP is the annotation to set the forward protocol of the LB to HTTP
+	// The possible values are "false", "true" or "*" for all ports or a comma delimited list of the service port
+	// (for instance "80,443")
+	serviceAnnotationLoadBalancerProtocolHTTP = "service.beta.kubernetes.io/scw-loadbalancer-protocol-http"
+
+	// serviceAnnotationLoadBalancerCertificateIDs is the annotation to choose the the certificate IDS to associate
+	// with this LoadBalancer.
+	// The possible format are:
+	// "<certificate-id>": will use this certificate for all frontends
+	// "<certificate-id>,<certificate-id>" will use these certificates for all frontends
+	// "<port1>:<certificate1-id>,<certificate2-id>;<port2>,<port3>:<certificate3-id>" will use certificate 1 and 2 for frontend with port port1
+	// and certificate3 for frotend with port port2 and port3
+	serviceAnnotationLoadBalancerCertificateIDs = "service.beta.kubernetes.io/scw-loadbalancer-certificate-ids"
 )
 
 type loadbalancers struct {
@@ -650,14 +664,19 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 
 	for _, port := range service.Spec.Ports {
 		var frontendID string
+		certificateIDs, err := getCertificateIDs(service, port.Port)
+		if err != nil {
+			return fmt.Errorf("error getting certificate IDs for loadbalancer %s: %v", loadbalancer.ID, err)
+		}
 		// if the frontend exists for the port, update it
 		if frontend, ok := portFrontends[port.Port]; ok {
 			_, err := l.api.UpdateFrontend(&scwlb.UpdateFrontendRequest{
-				FrontendID:    frontend.ID,
-				Name:          frontend.Name,
-				InboundPort:   frontend.InboundPort,
-				BackendID:     portBackends[port.NodePort].ID,
-				TimeoutClient: frontend.TimeoutClient,
+				FrontendID:     frontend.ID,
+				Name:           frontend.Name,
+				InboundPort:    frontend.InboundPort,
+				BackendID:      portBackends[port.NodePort].ID,
+				TimeoutClient:  frontend.TimeoutClient,
+				CertificateIDs: scw.StringsPtr(certificateIDs),
 			})
 
 			if err != nil {
@@ -669,11 +688,12 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 		} else { // if the frontend for this port does not exist, create it
 			timeoutClient := time.Minute * 10
 			resp, err := l.api.CreateFrontend(&scwlb.CreateFrontendRequest{
-				LBID:          loadbalancer.ID,
-				Name:          fmt.Sprintf("%s_tcp_%d", string(service.UID), port.Port),
-				InboundPort:   port.Port,
-				BackendID:     portBackends[port.NodePort].ID,
-				TimeoutClient: &timeoutClient, // TODO use annotation?
+				LBID:           loadbalancer.ID,
+				Name:           fmt.Sprintf("%s_tcp_%d", string(service.UID), port.Port),
+				InboundPort:    port.Port,
+				BackendID:      portBackends[port.NodePort].ID,
+				TimeoutClient:  &timeoutClient, // TODO use annotation?
+				CertificateIDs: scw.StringsPtr(certificateIDs),
 			})
 
 			if err != nil {
@@ -768,10 +788,15 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 }
 
 func (l *loadbalancers) makeUpdateBackendRequest(backend *scwlb.Backend, service *v1.Service, nodes []*v1.Node) (*scwlb.UpdateBackendRequest, error) {
+	protocol, err := getForwardProtocol(service, backend.ForwardPort)
+	if err != nil {
+		return nil, err
+	}
+
 	request := &scwlb.UpdateBackendRequest{
 		BackendID:       backend.ID,
 		Name:            backend.Name,
-		ForwardProtocol: scwlb.ProtocolTCP,
+		ForwardProtocol: protocol,
 	}
 
 	forwardPortAlgorithm, err := getForwardPortAlgorithm(service)
@@ -906,6 +931,10 @@ func (l *loadbalancers) makeUpdateHealthCheckRequest(backend *scwlb.Backend, nod
 }
 
 func (l *loadbalancers) makeCreateBackendRequest(loadbalancer *scwlb.LB, nodePort int32, service *v1.Service, nodes []*v1.Node) (*scwlb.CreateBackendRequest, error) {
+	protocol, err := getForwardProtocol(service, nodePort)
+	if err != nil {
+		return nil, err
+	}
 	var serverIPs []string
 	if getForceInternalIP(service) {
 		serverIPs = extractNodesInternalIps(nodes)
@@ -916,7 +945,7 @@ func (l *loadbalancers) makeCreateBackendRequest(loadbalancer *scwlb.LB, nodePor
 		LBID:            loadbalancer.ID,
 		Name:            fmt.Sprintf("%s_tcp_%d", string(service.UID), nodePort),
 		ServerIP:        serverIPs,
-		ForwardProtocol: scwlb.ProtocolTCP,
+		ForwardProtocol: protocol,
 		ForwardPort:     nodePort,
 	}
 
@@ -1401,4 +1430,58 @@ func getUseHostname(service *v1.Service) bool {
 		return false
 	}
 	return value
+}
+
+func getForwardProtocol(service *v1.Service, nodePort int32) (scwlb.Protocol, error) {
+	httpProtocol := service.Annotations[serviceAnnotationLoadBalancerProtocolHTTP]
+
+	var svcPort int32 = -1
+	for _, p := range service.Spec.Ports {
+		if p.NodePort == nodePort {
+			svcPort = p.Port
+		}
+	}
+	if svcPort == -1 {
+		klog.Errorf("no valid port found")
+		return "", errLoadBalancerInvalidAnnotation
+	}
+
+	isHTTP, err := isPortInRange(httpProtocol, svcPort)
+	if err != nil {
+		klog.Errorf("unable to check if port %d is in range %s", svcPort, httpProtocol)
+		return "", err
+	}
+
+	if isHTTP {
+		return scwlb.ProtocolHTTP, nil
+	}
+
+	return scwlb.ProtocolTCP, nil
+}
+
+func getCertificateIDs(service *v1.Service, port int32) ([]string, error) {
+	certificates := service.Annotations[serviceAnnotationLoadBalancerCertificateIDs]
+	if certificates == "" {
+		return nil, nil
+	}
+
+	ids := []string{}
+
+	for _, perPortCertificate := range strings.Split(certificates, ";") {
+		split := strings.Split(perPortCertificate, ":")
+		if len(split) == 1 {
+			ids = append(ids, strings.Split(split[0], ",")...)
+			continue
+		}
+		inRange, err := isPortInRange(split[0], port)
+		if err != nil {
+			klog.Errorf("unable to check if port %d is in range %s", port, split[0])
+			return nil, err
+		}
+		if inRange {
+			ids = append(ids, strings.Split(split[1], ",")...)
+		}
+	}
+
+	return ids, nil
 }

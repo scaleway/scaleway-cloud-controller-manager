@@ -113,3 +113,14 @@ Normally, the cloud controller manager use ExternalIP to be nodes region-free (o
 This is the annotation that force the use of the LB hostname instead of the public IP.
 This is useful when it it needed to not bypass the LoadBalacer for traffic coming from the cluster.
 
+### `service.beta.kubernetes.io/scw-loadbalancer-protocol-http`
+This is the annotation to set the forward protocol of the LB to HTTP.
+The possible values are `false`, `true` or `*` for all ports or a comma delimited list of the service port (for instance `80,443`).
+NB: forwarding HTTPS traffic with HTTP protocol enabled will work only if using a certificate, and the LB will send HTTP traffic to the backend.
+
+### `service.beta.kubernetes.io/scw-loadbalancer-certificate-ids`
+This is the annotation to choose the the certificate IDs to associate with this LoadBalancer.
+The possible format are:
+ - `<certificate-id>`: will use this certificate for all frontends
+ - `<certificate-id>,<certificate-id>` will use these certificates for all frontends
+ - `<port1>:<certificate1-id>,<certificate2-id>;<port2>,<port3>:<certificate3-id>` will use certificate 1 and 2 for frontend with port port1 and certificate3 for frotend with port port2 and port3
