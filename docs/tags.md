@@ -13,7 +13,7 @@ Once the tag is removed from the instance, it will also be removed as a label on
 
 ## Taints
 
-In order for a tag to be synced to a taint, it needs to be of the form `taint=foo:bar:Effect`, where `Effect` is one of `NoExecute`, `NoSchedule` or `PreferNoSchedule`.
+In order for a tag to be synced to a taint, it needs to be of the form `taint=foo=bar:Effect`, where `Effect` is one of `NoExecute`, `NoSchedule` or `PreferNoSchedule`.
 In this case, the Kubernetes nodes will have the tain `k8s.scaleway.com/foo=bar` with the effect `Effect`.
 
 Once the tag is removed from the instance, it will also be removed as a taint on the node.
