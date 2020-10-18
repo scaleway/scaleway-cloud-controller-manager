@@ -7,14 +7,14 @@ The Scaleway CCM will also sync the tags of the Scaleway Instance to Kubernetes 
 ## Labels
 
 In order for a tag to be synced to a label, it needs to be of the form `foo=bar`.
-In this case, the Kuebrnetes nodes will have the label `k8s.scaleway.com/foo=bar`.
+In this case, the Kubernetes nodes will have the label `k8s.scaleway.com/foo=bar`.
 
 Once the tag is removed from the instance, it will also be removed as a label on the node.
 
 ## Taints
 
-In order for a tag to be synced to a taint, it needs to be of the form `taint=foo:bar:Effect`, where `Effect` is one of `NoExecute`, `NoSchedule` or `PreferNoSchedule`.
-In this case, the Kubernetes nodes will have the tain `k8s.scaleway.com/foo=bar` with the effect `Effect`.
+In order for a tag to be synced to a taint, it needs to be of the form `taint=foo=bar:Effect`, where `Effect` is one of `NoExecute`, `NoSchedule` or `PreferNoSchedule`.
+In this case, the Kubernetes nodes will have the taint `k8s.scaleway.com/foo=bar` with the effect `Effect`.
 
 Once the tag is removed from the instance, it will also be removed as a taint on the node.
 
