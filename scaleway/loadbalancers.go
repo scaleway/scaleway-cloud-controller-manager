@@ -382,13 +382,11 @@ func (l *loadbalancers) fetchLoadBalancer(ctx context.Context, clusterName strin
 			Region: region,
 		})
 		if err != nil {
-			switch err.(type) {
-			case *scw.ResourceNotFoundError:
+			if is404Error(err) {
 				return nil, LoadBalancerNotFound
-			default:
-				klog.Errorf("an error occurred while fetching loadbalancer '%s/%s' for service '%s/%s'", region, loadBalancerID, service.Namespace, service.Name)
-				return nil, err
 			}
+			klog.Errorf("an error occurred while fetching loadbalancer '%s/%s' for service '%s/%s'", region, loadBalancerID, service.Namespace, service.Name)
+			return nil, err
 		}
 
 		return resp, nil
@@ -408,12 +406,10 @@ func (l *loadbalancers) getLoadbalancerByName(ctx context.Context, service *v1.S
 			Region: region,
 		}, scw.WithAllPages())
 		if err != nil {
-			switch err.(type) {
-			case *scw.ResourceNotFoundError:
+			if is404Error(err) {
 				continue
-			default:
-				return nil, err
 			}
+			return nil, err
 		}
 
 		for _, lb := range resp.LBs {
