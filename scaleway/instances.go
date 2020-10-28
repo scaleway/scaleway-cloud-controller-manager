@@ -202,12 +202,10 @@ func (i *instances) getServerByName(name string) (*scwinstance.Server, error) {
 		}, scw.WithAllPages())
 
 		if err != nil {
-			switch err.(type) {
-			case *scw.ResourceNotFoundError:
+			if is404Error(err) {
 				continue
-			default:
-				return nil, err
 			}
+			return nil, err
 		}
 
 		for _, srv := range resp.Servers {
@@ -243,12 +241,10 @@ func (i *instances) getServerByProviderID(providerID string) (*scwinstance.Serve
 		Zone:     scw.Zone(zone),
 	})
 	if err != nil {
-		switch err.(type) {
-		case *scw.ResourceNotFoundError:
+		if is404Error(err) {
 			return nil, cloudprovider.InstanceNotFound
-		default:
-			return nil, err
 		}
+		return nil, err
 	}
 
 	return resp.Server, nil
