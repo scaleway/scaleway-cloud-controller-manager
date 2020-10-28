@@ -190,12 +190,10 @@ func (b *baremetal) getServerOfferName(server *scwbaremetal.Server) (string, err
 		Zone:    server.Zone,
 	})
 	if err != nil {
-		switch err.(type) {
-		case *scw.ResourceNotFoundError:
+		if is404Error(err) {
 			return "UNKNOWN", nil
-		default:
-			return "", err
 		}
+		return "", err
 	}
 
 	return offer.Name, nil
@@ -215,12 +213,10 @@ func (b *baremetal) getServerByName(name string) (*scwbaremetal.Server, error) {
 			Name: &name,
 		}, scw.WithAllPages())
 		if err != nil {
-			switch err.(type) {
-			case *scw.ResourceNotFoundError:
+			if is404Error(err) {
 				continue
-			default:
-				return nil, err
 			}
+			return nil, err
 		}
 
 		for _, srv := range resp.Servers {
@@ -255,12 +251,10 @@ func (b *baremetal) getServerByProviderID(providerID string) (*scwbaremetal.Serv
 		Zone:     scw.Zone(zone),
 	})
 	if err != nil {
-		switch err.(type) {
-		case *scw.ResourceNotFoundError:
+		if is404Error(err) {
 			return nil, cloudprovider.InstanceNotFound
-		default:
-			return nil, err
 		}
+		return nil, err
 	}
 	return server, nil
 }
