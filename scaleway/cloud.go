@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/scaleway/scaleway-sdk-go/logger"
@@ -42,6 +43,14 @@ const (
 
 	// extraUserAgentEnv is the environment variable that adds some string at the end of the user agent
 	extraUserAgentEnv = "EXTRA_USER_AGENT"
+	// disableInterfacesEnv is the environment variable used to disable some cloud interfaces
+	disableInterfacesEnv      = "DISABLE_INTERFACES"
+	instancesInterfaceName    = "instances"
+	loadBalancerInterfaceName = "loadbalancer"
+	zonesInterfaceName        = "zones"
+
+	// loadBalancerDefaultTypeEnv is the environment to choose the default LB type
+	loadBalancerDefaultTypeEnv = "LB_DEFAULT_TYPE"
 )
 
 type cloud struct {
@@ -84,12 +93,27 @@ func newCloud(config io.Reader) (cloudprovider.Interface, error) {
 
 	client := newClient(scwClient)
 
+	instancesInterface := newServers(client)
+	loadbalancerInterface := newLoadbalancers(client, os.Getenv(loadBalancerDefaultTypeEnv))
+	zonesInterface := newZones(client)
+
+	for _, disableInterface := range strings.Split(os.Getenv(disableInterfacesEnv), ",") {
+		switch strings.ToLower(disableInterface) {
+		case instancesInterfaceName:
+			instancesInterface = nil
+		case loadBalancerInterfaceName:
+			loadbalancerInterface = nil
+		case zonesInterfaceName:
+			zonesInterface = nil
+		}
+	}
+
 	return &cloud{
 		client:        client,
-		instances:     newServers(client),
-		instancesV2:   newServers(client),
-		zones:         newZones(client),
-		loadbalancers: newLoadbalancers(client),
+		instances:     instancesInterface,
+		instancesV2:   instancesInterface,
+		zones:         zonesInterface,
+		loadbalancers: loadbalancerInterface,
 	}, nil
 }
 
@@ -111,19 +135,19 @@ func (c *cloud) Initialize(clientBuilder cloudprovider.ControllerClientBuilder, 
 }
 
 func (c *cloud) LoadBalancer() (cloudprovider.LoadBalancer, bool) {
-	return c.loadbalancers, true
+	return c.loadbalancers, c.loadbalancers != nil
 }
 
 func (c *cloud) Instances() (cloudprovider.Instances, bool) {
-	return c.instances, true
+	return c.instances, c.instances != nil
 }
 
 func (c *cloud) InstancesV2() (cloudprovider.InstancesV2, bool) {
-	return c.instancesV2, true
+	return c.instancesV2, c.instancesV2 != nil
 }
 
 func (c *cloud) Zones() (cloudprovider.Zones, bool) {
-	return c.zones, true
+	return c.zones, c.zones != nil
 }
 
 // clusters is not implemented
