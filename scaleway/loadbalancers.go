@@ -480,7 +480,7 @@ func (l *loadbalancers) createLoadBalancer(ctx context.Context, clusterName stri
 	lbName := l.GetLoadBalancerName(ctx, clusterName, service)
 
 	lbType := getLoadBalancerType(service)
-	if lbType != "" {
+	if lbType == "" {
 		lbType = l.defaultLBType
 	}
 

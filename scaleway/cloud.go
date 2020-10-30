@@ -135,19 +135,19 @@ func (c *cloud) Initialize(clientBuilder cloudprovider.ControllerClientBuilder, 
 }
 
 func (c *cloud) LoadBalancer() (cloudprovider.LoadBalancer, bool) {
-	return c.loadbalancers, true
+	return c.loadbalancers, c.loadbalancers != nil
 }
 
 func (c *cloud) Instances() (cloudprovider.Instances, bool) {
-	return c.instances, true
+	return c.instances, c.instances != nil
 }
 
 func (c *cloud) InstancesV2() (cloudprovider.InstancesV2, bool) {
-	return c.instancesV2, true
+	return c.instancesV2, c.instancesV2 != nil
 }
 
 func (c *cloud) Zones() (cloudprovider.Zones, bool) {
-	return c.zones, true
+	return c.zones, c.zones != nil
 }
 
 // clusters is not implemented
