@@ -59,6 +59,7 @@ var (
 	labelsPrefix     = "k8s.scaleway.com/"
 	taintsPrefix     = "k8s.scaleway.com/"
 	labelTaintPrefix = "taint="
+	labelNoPrefix    = "noprefix="
 
 	// K8S labels
 	labelNodeRoleExcludeBalancer      = "node.kubernetes.io/exclude-from-external-load-balancers"
@@ -333,10 +334,17 @@ func (s *syncController) SyncLBTags() {
 }
 
 func tagLabelParser(tag string) (key string, value string) {
+	prefix := labelsPrefix
+
+	if strings.HasPrefix(tag, labelNoPrefix) {
+		prefix = ""
+		tag = strings.TrimPrefix(tag, labelNoPrefix)
+	}
+
 	split := splitRegexp.Split(tag, -1)
 
-	key = labelsPrefix + labelsRegexp.FindString(split[0])
-	if key == labelsPrefix || len(key) > 63 {
+	key = prefix + labelsRegexp.FindString(split[0])
+	if key == prefix || len(key) > 63 {
 		return "", ""
 	}
 
