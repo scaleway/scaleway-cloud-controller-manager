@@ -219,7 +219,7 @@ func TestInstances_InstanceID(t *testing.T) {
 	t.Run("Found", func(t *testing.T) {
 		result, err := instance.InstanceID(context.TODO(), "scw-nervous-mccarthy")
 		AssertNoError(t, err)
-		Equals(t, "scaleway://instance/fr-par-1/232bf860-9ffe-4b08-97da-158c0316ed15", result)
+		Equals(t, "instance/fr-par-1/232bf860-9ffe-4b08-97da-158c0316ed15", result)
 	})
 
 	t.Run("NotFound", func(t *testing.T) {
