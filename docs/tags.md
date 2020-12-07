@@ -11,6 +11,13 @@ In this case, the Kuebrnetes nodes will have the label `k8s.scaleway.com/foo=bar
 
 Once the tag is removed from the instance, it will also be removed as a label on the node.
 
+### Non prefixed labels
+
+It is possible to add labels nop prefixed with `k8s.scaleway.com`. The downside, is that when you will delete the associated tag, the label won't get removed.
+In order to have non prefixed labels, you should prefix the tag with `noprefix=`.
+
+For intance the tag `noprefix=foo=bar` will yield the `foo=bar` label on the Kubernetes nodes.
+
 ## Taints
 
 In order for a tag to be synced to a taint, it needs to be of the form `taint=foo:bar:Effect`, where `Effect` is one of `NoExecute`, `NoSchedule` or `PreferNoSchedule`.
