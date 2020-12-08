@@ -207,7 +207,7 @@ func TestBaremetal_InstanceID(t *testing.T) {
 	t.Run("Found", func(t *testing.T) {
 		result, err := baremetal.InstanceID(context.TODO(), "bm-keen-feistel")
 		AssertNoError(t, err)
-		Equals(t, "scaleway://baremetal/fr-par-2/53a6ca14-0d8d-4f2e-9887-2f1bcfba58ed", result)
+		Equals(t, "baremetal/fr-par-2/53a6ca14-0d8d-4f2e-9887-2f1bcfba58ed", result)
 	})
 
 	t.Run("NotFound", func(t *testing.T) {

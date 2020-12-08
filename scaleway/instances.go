@@ -69,7 +69,7 @@ func (i *instances) InstanceID(ctx context.Context, name types.NodeName) (string
 	if err != nil {
 		return "", err
 	}
-	return BuildProviderID(InstanceTypeInstance, string(instanceServer.Zone), instanceServer.ID), nil
+	return BuildInstanceID(InstanceTypeInstance, string(instanceServer.Zone), instanceServer.ID), nil
 }
 
 // InstanceType returns the type of the specified instance (ex. DEV1-M, GP1-XS,...).

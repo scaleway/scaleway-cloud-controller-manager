@@ -68,9 +68,14 @@ func ServerInfoFromProviderID(providerID string) (string, string, string, error)
 	return result[regexpProduct], result[regexpLocalization], result[regexpUUID], nil
 }
 
+// BuildInstanceID build the instanceID from given informations
+func BuildInstanceID(product, localization, id string) string {
+	return fmt.Sprintf("%s/%s/%s", product, localization, id)
+}
+
 // BuildProviderID build the providerID from given informations
 func BuildProviderID(product, localization, id string) string {
-	return fmt.Sprintf("%s://%s/%s/%s", providerName, product, localization, id)
+	return fmt.Sprintf("%s://%s", providerName, BuildInstanceID(product, localization, id))
 }
 
 // getImplementationByProviderID returns the corresponding cloudprovider.Instances implementation

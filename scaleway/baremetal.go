@@ -69,7 +69,7 @@ func (b *baremetal) InstanceID(ctx context.Context, nodeName types.NodeName) (st
 	if err != nil {
 		return "", err
 	}
-	return BuildProviderID(InstanceTypeBaremtal, string(baremetalServer.Zone), baremetalServer.ID), nil
+	return BuildInstanceID(InstanceTypeBaremtal, string(baremetalServer.Zone), baremetalServer.ID), nil
 }
 
 // InstanceType returns the type of the specified instance.
