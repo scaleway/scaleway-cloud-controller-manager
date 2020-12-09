@@ -24,10 +24,12 @@ Currently `scaleway-cloud-controller-manager` currently implements:
 
 ## Compatibility matrix
 
-|         | K8S 1.15 | K8S 1.16 | K8S 1.17 | K8S 1.18 |
+|         | K8S 1.17 | K8S 1.18 | K8S 1.19 | K8S 1.20 |
 |---------|----------|----------|----------|----------|
-|  v0.1.x | ~        | ~        | ✓        | ~        |
-| v0.18.x | ~        | ~        | ~        | ✓        |
+|  v0.1.x | ✓        | ~        | ~        | ~        |
+| v0.18.x | ~        | ✓        | ~        | ~        |
+| v0.19.x | ~        | ~        | ✓        | ~        |
+| v0.20.x | ~        | ~        | ~        | ✓        |
 
 - `✓` fully supported
 - `~` some features may not be supported (usually a Kubernetes version mismatch)
