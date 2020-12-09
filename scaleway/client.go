@@ -18,12 +18,12 @@ package scaleway
 
 import (
 	"github.com/scaleway/scaleway-sdk-go/scw"
-	"k8s.io/client-go/kubernetes"
+	clientset "k8s.io/client-go/kubernetes"
 )
 
 type client struct {
 	scaleway   *scw.Client
-	kubernetes *kubernetes.Clientset
+	kubernetes clientset.Interface
 }
 
 func newClient(scaleway *scw.Client) *client {

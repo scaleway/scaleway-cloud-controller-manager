@@ -26,14 +26,13 @@ import (
 
 	"github.com/scaleway/scaleway-sdk-go/logger"
 	"github.com/scaleway/scaleway-sdk-go/scw"
-	"k8s.io/client-go/kubernetes"
 	cloudprovider "k8s.io/cloud-provider"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 )
 
 const (
-	// define the provider
-	providerName         = "scaleway"
+	// ProviderName define the provider
+	ProviderName         = "scaleway"
 	cacheUpdateFrequency = time.Minute * 10
 
 	// optional fields
@@ -118,14 +117,13 @@ func newCloud(config io.Reader) (cloudprovider.Interface, error) {
 }
 
 func init() {
-	cloudprovider.RegisterCloudProvider(providerName, func(config io.Reader) (cloudprovider.Interface, error) {
+	cloudprovider.RegisterCloudProvider(ProviderName, func(config io.Reader) (cloudprovider.Interface, error) {
 		return newCloud(config)
 	})
 }
 
 func (c *cloud) Initialize(clientBuilder cloudprovider.ControllerClientBuilder, stop <-chan struct{}) {
-	restConfig := clientBuilder.ConfigOrDie("cloud-controller-manager")
-	c.client.kubernetes = kubernetes.NewForConfigOrDie(restConfig)
+	c.client.kubernetes = clientBuilder.ClientOrDie("cloud-controller-manager")
 
 	klog.Infof("clientset initialized")
 
@@ -161,7 +159,7 @@ func (c *cloud) Routes() (cloudprovider.Routes, bool) {
 }
 
 func (c *cloud) ProviderName() string {
-	return providerName
+	return ProviderName
 }
 
 // has cluster id is not implemented
