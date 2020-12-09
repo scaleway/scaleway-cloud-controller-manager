@@ -29,17 +29,17 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/kubernetes"
+	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 )
 
 type syncController struct {
 	client            *client
 	lbAPI             LoadBalancerAPI
 	instanceAPI       InstanceAPI
-	clientSet         *kubernetes.Clientset
+	clientSet         clientset.Interface
 	nodeIndexer       cache.Indexer
 	nodeController    cache.Controller
 	serviceIndexer    cache.Indexer
@@ -66,7 +66,7 @@ var (
 	labelNodeRoleExcludeBalancerValue = "managed-by-scaleway-ccm"
 )
 
-func newSyncController(client *client, clientset *kubernetes.Clientset, cacheUpdateFrequency time.Duration) *syncController {
+func newSyncController(client *client, clientset clientset.Interface, cacheUpdateFrequency time.Duration) *syncController {
 	nodeListWatcher := cache.NewListWatchFromClient(clientset.CoreV1().RESTClient(), "nodes", v1.NamespaceAll, fields.Everything())
 	serviceListWatcher := cache.NewListWatchFromClient(clientset.CoreV1().RESTClient(), "services", v1.NamespaceAll, fields.Everything())
 

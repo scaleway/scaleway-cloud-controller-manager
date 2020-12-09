@@ -9,7 +9,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	cloudprovider "k8s.io/cloud-provider"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 )
 
 const (
@@ -40,7 +40,7 @@ var (
 	regexpProduct      = "product"
 	regexpLocalization = "localization"
 	regexpUUID         = "uuid"
-	providerIDRegexp   = regexp.MustCompile(fmt.Sprintf("%s://((?P<%s>.*?)/(?P<%s>.*?)/(?P<%s>.*)|(?P<%s>.*))", providerName, regexpProduct, regexpLocalization, regexpUUID, regexpUUID))
+	providerIDRegexp   = regexp.MustCompile(fmt.Sprintf("%s://((?P<%s>.*?)/(?P<%s>.*?)/(?P<%s>.*)|(?P<%s>.*))", ProviderName, regexpProduct, regexpLocalization, regexpUUID, regexpUUID))
 )
 
 // ServerInfoFromProviderID extract the product type, zone and uuid from the providerID
@@ -70,13 +70,13 @@ func ServerInfoFromProviderID(providerID string) (string, string, string, error)
 
 // BuildProviderID build the providerID from given informations
 func BuildProviderID(product, localization, id string) string {
-	return fmt.Sprintf("%s://%s/%s/%s", providerName, product, localization, id)
+	return fmt.Sprintf("%s://%s/%s/%s", ProviderName, product, localization, id)
 }
 
 // getImplementationByProviderID returns the corresponding cloudprovider.Instances implementation
 // At scaleway, the new baremetal offer is not integrated with instance API.
 func (s *servers) getImplementationByProviderID(providerID string) Servers {
-	if strings.HasPrefix(providerID, providerName+"://"+InstanceTypeBaremtal) {
+	if strings.HasPrefix(providerID, ProviderName+"://"+InstanceTypeBaremtal) {
 		return s.baremetal
 	}
 	return s.instances
