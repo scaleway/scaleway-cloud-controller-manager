@@ -328,9 +328,16 @@ func (b *baremetal) InstanceMetadata(ctx context.Context, node *v1.Node) (*cloud
 		return nil, err
 	}
 
+	region, err := bm.Zone.Region()
+	if err != nil {
+		return nil, err
+	}
+
 	return &cloudprovider.InstanceMetadata{
 		ProviderID:    BuildProviderID(InstanceTypeBaremtal, bm.Zone.String(), bm.ID),
 		InstanceType:  offerName,
 		NodeAddresses: baremetalAddresses(bm),
+		Region:        region.String(),
+		Zone:          bm.Zone.String(),
 	}, nil
 }

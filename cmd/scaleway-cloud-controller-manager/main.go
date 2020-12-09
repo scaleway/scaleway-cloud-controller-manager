@@ -44,6 +44,21 @@ func main() {
 	if err != nil {
 		klog.Fatalf("unable to initialize command options: %v", err)
 	}
+
+	fs := pflag.NewFlagSet("scaleway-cloud-controller-manager", pflag.ContinueOnError)
+	fs.SetNormalizeFunc(flag.WordSepNormalizeFunc)
+	for _, f := range s.Flags([]string{"cloud-node", "cloud-node-lifecycle", "service", "route"}, app.ControllersDisabledByDefault.List()).FlagSets {
+		fs.AddFlagSet(f)
+	}
+
+	err = fs.Parse(os.Args[1:])
+	if err != nil {
+		if err != pflag.ErrHelp {
+			klog.Errorf("could not parse arguments: %v", err)
+		}
+		os.Exit(1)
+	}
+
 	c, err := s.Config([]string{}, app.ControllersDisabledByDefault.List())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
@@ -77,10 +92,6 @@ func main() {
 	controllerInitializers := app.DefaultControllerInitializers(c.Complete(), cloud)
 	command := app.NewCloudControllerManagerCommand(s, c, controllerInitializers)
 
-	// TODO: once we switch everything over to Cobra commands, we can go back to calling
-	// utilflag.InitFlags() (by removing its pflag.Parse() call). For now, we have to set the
-	// normalize func and add the go flag set by hand.
-	pflag.CommandLine.SetNormalizeFunc(flag.WordSepNormalizeFunc)
 	// utilflag.InitFlags()
 	logs.InitLogs()
 	defer logs.FlushLogs()

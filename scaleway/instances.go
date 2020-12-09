@@ -314,9 +314,16 @@ func (i *instances) InstanceMetadata(ctx context.Context, node *v1.Node) (*cloud
 		return nil, err
 	}
 
+	region, err := instance.Zone.Region()
+	if err != nil {
+		return nil, err
+	}
+
 	return &cloudprovider.InstanceMetadata{
 		ProviderID:    BuildProviderID(InstanceTypeInstance, instance.Zone.String(), instance.ID),
 		InstanceType:  instance.CommercialType,
 		NodeAddresses: instanceAddresses(instance),
+		Region:        region.String(),
+		Zone:          instance.Zone.String(),
 	}, nil
 }
