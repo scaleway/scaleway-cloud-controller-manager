@@ -356,7 +356,7 @@ func tagLabelParser(tag string) (key string, value string) {
 		}
 		if len(tagSplit) == 2 {
 			if tagSplit[0] == "" {
-				klog.Errorf("tag %s is not valid: prefix is empty")
+				klog.Errorf("tag %s is not valid: prefix is empty", tag)
 				return "", ""
 			}
 			if errs := validation.IsDNS1123Subdomain(tagSplit[0]); len(errs) != 0 {
