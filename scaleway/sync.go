@@ -28,6 +28,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
@@ -53,13 +54,20 @@ const (
 	exponentialMaxRetries = 30
 )
 
+// from k8s.io/apimachinery/pkg/util/validation/validation.go
+const qnameCharFmt string = "[A-Za-z0-9]"
+const qnameExtCharFmt string = "[-A-Za-z0-9_.]"
+const qualifiedNameFmt string = "(" + qnameCharFmt + qnameExtCharFmt + "*)?" + qnameCharFmt
+const qualifiedNameErrMsg string = "must consist of alphanumeric characters, '-', '_' or '.', and must start and end with an alphanumeric character"
+const qualifiedNameMaxLength int = 63
+
 var (
-	splitRegexp      = regexp.MustCompile(`[:= ]+`)
-	labelsRegexp     = regexp.MustCompile(`^(([A-Za-z0-9][-A-Za-z0-9_\\.]*)?[A-Za-z0-9])?$`)
-	labelsPrefix     = "k8s.scaleway.com/"
-	taintsPrefix     = "k8s.scaleway.com/"
-	labelTaintPrefix = "taint="
-	labelNoPrefix    = "noprefix="
+	splitRegexp         = regexp.MustCompile(`[:= ]+`)
+	qualifiedNameRegexp = regexp.MustCompile("^" + qualifiedNameFmt + "$")
+	labelsPrefix        = "k8s.scaleway.com/"
+	taintsPrefix        = "k8s.scaleway.com/"
+	labelTaintPrefix    = "taint="
+	labelNoPrefix       = "noprefix="
 
 	// K8S labels
 	labelNodeRoleExcludeBalancer      = "node.kubernetes.io/exclude-from-external-load-balancers"
@@ -335,22 +343,50 @@ func (s *syncController) SyncLBTags() {
 
 func tagLabelParser(tag string) (key string, value string) {
 	prefix := labelsPrefix
+	tagValue := tag
 
 	if strings.HasPrefix(tag, labelNoPrefix) {
 		prefix = ""
-		tag = strings.TrimPrefix(tag, labelNoPrefix)
+		tagValue = strings.TrimPrefix(tag, labelNoPrefix)
+		tagSplit := strings.Split(tagValue, "/")
+
+		if len(tagSplit) > 2 {
+			klog.Errorf("tag %s is not valid: %s contains more than 1 '/'", tag, tagValue)
+			return "", ""
+		}
+		if len(tagSplit) == 2 {
+			if tagSplit[0] == "" {
+				klog.Errorf("tag %s is not valid: prefix is empty")
+				return "", ""
+			}
+			if errs := validation.IsDNS1123Subdomain(tagSplit[0]); len(errs) != 0 {
+				klog.Errorf("tag %s is not valid: prefix is not composed of DNS labels: %s", tag, strings.Join(errs, ","))
+				return "", ""
+			}
+			prefix = tagSplit[0] + "/"
+			tagValue = tagSplit[1]
+		}
 	}
 
-	split := splitRegexp.Split(tag, -1)
+	split := splitRegexp.Split(tagValue, -1)
 
-	key = prefix + labelsRegexp.FindString(split[0])
-	if key == prefix || len(key) > 63 {
+	if len(split[0]) == 0 {
+		klog.Errorf("tag %s have an empty key", tag)
 		return "", ""
 	}
-
+	if len(split[0]) > qualifiedNameMaxLength {
+		klog.Errorf("tag %s have a key too long, got %d instead of max %d", tag, len(split[0]), qualifiedNameMaxLength)
+		return "", ""
+	}
+	if !qualifiedNameRegexp.MatchString(split[0]) {
+		klog.Errorf("tag %s key must consist of alphanumeric characters, '-', '_' or '.', and must start and end with an alphanumeric character", tag)
+		return "", ""
+	}
+	key = prefix + split[0]
 	if len(split) > 1 {
-		value = labelsRegexp.FindString(split[1])
-		if value == "" || len(value) > 63 {
+		value = split[1]
+		if errs := validation.IsValidLabelValue(value); len(errs) != 0 {
+			klog.Errorf("tag %s value must be an empty string or consist of alphanumeric characters, '-', '_' or '.', and must start and end with an alphanumeric character", tag)
 			return "", ""
 		}
 	}
