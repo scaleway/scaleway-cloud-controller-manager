@@ -1489,6 +1489,17 @@ func getCertificateIDs(service *v1.Service, port int32) ([]string, error) {
 			ids = append(ids, strings.Split(split[1], ",")...)
 		}
 	}
+	// normalize the ids (ie strip the region prefix if any)
+	for i := range ids {
+		if strings.Contains(ids[i], "/") {
+			splitID := strings.Split(ids[i], "/")
+			if len(splitID) != 2 {
+				klog.Errorf("unable to get certificate ID from %s", ids[i])
+				return nil, fmt.Errorf("unable to get certificate ID from %s", ids[i])
+			}
+			ids[i] = splitID[1]
+		}
+	}
 
 	return ids, nil
 }
