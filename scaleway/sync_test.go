@@ -35,10 +35,12 @@ func TestTagTaintParser(t *testing.T) {
 	tagsTest := map[string][3]string{
 		"taint=":                    {"", "", ""},
 		"taint=word=word:NoExecute": {"k8s.scaleway.com/word", "word", "NoExecute"},
-		"taint=underscore_word=underscore_word:NoSchedule": {"k8s.scaleway.com/underscore_word", "underscore_word", "NoSchedule"},
-		"taint=dash-word=dash-word:PreferNoSchedule":       {"k8s.scaleway.com/dash-word", "dash-word", "PreferNoSchedule"},
-		"taint=dash-word=dash-word:foo":                    {"", "", ""},
-		"taint=dash-word=dash-word":                        {"", "", ""},
+		"taint=underscore_word=underscore_word:NoSchedule":                {"k8s.scaleway.com/underscore_word", "underscore_word", "NoSchedule"},
+		"taint=dash-word=dash-word:PreferNoSchedule":                      {"k8s.scaleway.com/dash-word", "dash-word", "PreferNoSchedule"},
+		"taint=dash-word=dash-word:foo":                                   {"", "", ""},
+		"taint=dash-word=dash-word":                                       {"", "", ""},
+		"taint=noprefix=dash-word=dash-word:PreferNoSchedule":             {"dash-word", "dash-word", "PreferNoSchedule"},
+		"taint=noprefix=node.k8s.io/dash-word=dash-word:PreferNoSchedule": {"node.k8s.io/dash-word", "dash-word", "PreferNoSchedule"},
 	}
 	for tag, expected := range tagsTest {
 		t.Run(tag, func(t *testing.T) {
@@ -59,6 +61,7 @@ func TestTagLabelParser(t *testing.T) {
 		"dash-word":             {"k8s.scaleway.com/dash-word", ""},
 		"equal1=value":          {"k8s.scaleway.com/equal1", "value"},
 		"noprefix=equal1=value": {"equal1", "value"},
+		"noprefix=node.kubernetes.io/role=myrole": {"node.kubernetes.io/role", "myrole"},
 		"equal2 = value":        {"k8s.scaleway.com/equal2", "value"},
 		"equal3 =value":         {"k8s.scaleway.com/equal3", "value"},
 		"equal4= value":         {"k8s.scaleway.com/equal4", "value"},
