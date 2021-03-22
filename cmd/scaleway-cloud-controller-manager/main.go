@@ -20,12 +20,12 @@ limitations under the License.
 package main
 
 import (
+	goflag "flag"
 	"fmt"
 	"math/rand"
 	"os"
 	"time"
 
-	"github.com/scaleway/scaleway-cloud-controller-manager/scaleway"
 	"github.com/spf13/pflag"
 	"k8s.io/cloud-provider"
 	"k8s.io/cloud-provider/app"
@@ -35,6 +35,8 @@ import (
 	_ "k8s.io/component-base/metrics/prometheus/clientgo" // load all the prometheus client-go plugins
 	_ "k8s.io/component-base/metrics/prometheus/version"  // for version metric registration
 	"k8s.io/klog/v2"
+
+	"github.com/scaleway/scaleway-cloud-controller-manager/scaleway"
 )
 
 func main() {
@@ -46,6 +48,9 @@ func main() {
 	}
 
 	fs := pflag.NewFlagSet("scaleway-cloud-controller-manager", pflag.ContinueOnError)
+	klogFlags := goflag.NewFlagSet("klog", goflag.ContinueOnError)
+	klog.InitFlags(klogFlags)
+	fs.AddGoFlagSet(klogFlags)
 	fs.SetNormalizeFunc(flag.WordSepNormalizeFunc)
 	for _, f := range s.Flags([]string{"cloud-node", "cloud-node-lifecycle", "service", "route"}, app.ControllersDisabledByDefault.List()).FlagSets {
 		fs.AddFlagSet(f)
