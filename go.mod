@@ -4,13 +4,12 @@ go 1.15
 
 require (
 	github.com/scaleway/scaleway-sdk-go v1.0.0-beta.6.0.20200820094136-e5e36003a999
-	golang.org/x/xerrors v0.0.0-20191204190536-9bdfabe68543
 	k8s.io/api v0.19.0
 	k8s.io/apimachinery v0.19.0
 	k8s.io/client-go v0.19.0
 	k8s.io/cloud-provider v0.19.0
 	k8s.io/component-base v0.19.0
-	k8s.io/klog v1.0.0
+	k8s.io/klog/v2 v2.2.0
 	k8s.io/kubernetes v1.19.0
 )
 
