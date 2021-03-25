@@ -406,27 +406,21 @@ func (l *loadbalancers) getLoadbalancerByName(ctx context.Context, service *v1.S
 	name := l.GetLoadBalancerName(ctx, "", service)
 
 	var loadbalancer *scwlb.LB
-	for _, region := range scw.AllRegions {
-		resp, err := l.api.ListLBs(&scwlb.ListLBsRequest{
-			Name:   &name,
-			Region: region,
-		}, scw.WithAllPages())
-		if err != nil {
-			if is404Error(err) {
-				continue
-			}
-			return nil, err
-		}
+	resp, err := l.api.ListLBs(&scwlb.ListLBsRequest{
+		Name: &name,
+	}, scw.WithAllPages())
+	if err != nil {
+		return nil, err
+	}
 
-		for _, lb := range resp.LBs {
-			if lb.Name == name {
-				if loadbalancer != nil {
-					klog.Errorf("more than one loadbalancing matching the name %s", name)
-					return nil, LoadBalancerDuplicated
-				}
-
-				loadbalancer = lb
+	for _, lb := range resp.LBs {
+		if lb.Name == name {
+			if loadbalancer != nil {
+				klog.Errorf("more than one loadbalancing matching the name %s", name)
+				return nil, LoadBalancerDuplicated
 			}
+
+			loadbalancer = lb
 		}
 	}
 
