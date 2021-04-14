@@ -189,6 +189,10 @@ func newLoadbalancers(client *client, defaultLBType string) *loadbalancers {
 // Implementations must treat the *v1.Service parameter as read-only and not modify it.
 // Parameter 'clusterName' is the name of the cluster as presented to kube-controller-manager
 func (l *loadbalancers) GetLoadBalancer(ctx context.Context, clusterName string, service *v1.Service) (*v1.LoadBalancerStatus, bool, error) {
+	if service.Spec.LoadBalancerClass != nil {
+		return nil, false, nil
+	}
+
 	lb, err := l.fetchLoadBalancer(ctx, clusterName, service)
 	if err != nil {
 		if err == LoadBalancerNotFound {
@@ -218,6 +222,10 @@ func (l *loadbalancers) GetLoadBalancer(ctx context.Context, clusterName string,
 // parameters as read-only and not modify them.
 // Parameter 'clusterName' is the name of the cluster as presented to kube-controller-manager
 func (l *loadbalancers) EnsureLoadBalancer(ctx context.Context, clusterName string, service *v1.Service, nodes []*v1.Node) (*v1.LoadBalancerStatus, error) {
+	if service.Spec.LoadBalancerClass != nil {
+		return nil, fmt.Errorf("scaleway-cloud-controller-manager cannot handle loadBalancerClas %s", *service.Spec.LoadBalancerClass)
+	}
+
 	lb, err := l.fetchLoadBalancer(ctx, clusterName, service)
 	switch err {
 	case nil:
@@ -274,6 +282,10 @@ func (l *loadbalancers) EnsureLoadBalancer(ctx context.Context, clusterName stri
 // parameters as read-only and not modify them.
 // Parameter 'clusterName' is the name of the cluster as presented to kube-controller-manager
 func (l *loadbalancers) UpdateLoadBalancer(ctx context.Context, clusterName string, service *v1.Service, nodes []*v1.Node) error {
+	if service.Spec.LoadBalancerClass != nil {
+		return fmt.Errorf("scaleway-cloud-controller-manager cannot handle loadBalancerClas %s", *service.Spec.LoadBalancerClass)
+	}
+
 	lb, err := l.fetchLoadBalancer(ctx, clusterName, service)
 	if err != nil {
 		klog.Errorf("error getting loadbalancer for service %s: %v", service.Name, err)
@@ -295,6 +307,10 @@ func (l *loadbalancers) UpdateLoadBalancer(ctx context.Context, clusterName stri
 // Implementations must treat the *v1.Service parameter as read-only and not modify it.
 // Parameter 'clusterName' is the name of the cluster as presented to kube-controller-manager
 func (l *loadbalancers) EnsureLoadBalancerDeleted(ctx context.Context, clusterName string, service *v1.Service) error {
+	if service.Spec.LoadBalancerClass != nil {
+		return nil
+	}
+
 	lb, err := l.fetchLoadBalancer(ctx, clusterName, service)
 	if err != nil {
 		if err == LoadBalancerNotFound {
