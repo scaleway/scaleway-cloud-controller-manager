@@ -49,7 +49,7 @@ const (
 	serviceAnnotationLoadBalancerStickySessionsCookieName = "service.beta.kubernetes.io/scw-loadbalancer-sticky-sessions-cookie-name"
 
 	// serviceAnnotationLoadBalancerHealthCheckType is the type of health check used
-	// The default value is "tcp" and the possible values are "tcp", "http", "mysql", "pgsql", "redis" or "ldap"
+	// The default value is "tcp" and the possible values are "tcp", "http", "https", "mysql", "pgsql", "redis" or "ldap"
 	// NB: depending on the type, some other annotations are required, see below
 	serviceAnnotationLoadBalancerHealthCheckType = "service.beta.kubernetes.io/scw-loadbalancer-health-check-type"
 
@@ -66,15 +66,15 @@ const (
 	serviceAnnotationLoadBalancerHealthCheckMaxRetries = "service.beta.kubernetes.io/scw-loadbalancer-health-check-max-retries"
 
 	// serviceAnnotationLoadBalancerHealthCheckHTTPURI is the URI that is used by the "http" health check
-	// NB: Required when setting service.beta.kubernetes.io/scw-loadbalancer-health-check-type to "http"
+	// NB: Required when setting service.beta.kubernetes.io/scw-loadbalancer-health-check-type to "http" or "https"
 	serviceAnnotationLoadBalancerHealthCheckHTTPURI = "service.beta.kubernetes.io/scw-loadbalancer-health-check-http-uri"
 
 	// serviceAnnotationLoadBalancerHealthCheckHTTPMethod is the HTTP method used by the "http" health check
-	// NB: Required when setting service.beta.kubernetes.io/scw-loadbalancer-health-check-type to "http"
+	// NB: Required when setting service.beta.kubernetes.io/scw-loadbalancer-health-check-type to "http" or "https"
 	serviceAnnotationLoadBalancerHealthCheckHTTPMethod = "service.beta.kubernetes.io/scw-loadbalancer-health-check-http-method"
 
 	// serviceAnnotationLoadBalancerHealthCheckHTTPCode is the HTTP code that the "http" health check will be matching against
-	// NB: Required when setting service.beta.kubernetes.io/scw-loadbalancer-health-check-type to "http"
+	// NB: Required when setting service.beta.kubernetes.io/scw-loadbalancer-health-check-type to "http" or "https"
 	serviceAnnotationLoadBalancerHealthCheckHTTPCode = "service.beta.kubernetes.io/scw-loadbalancer-health-check-http-code"
 
 	// serviceAnnotationLoadBalancerHealthCheckMysqlUser is the MySQL user used to check the MySQL connection when using the "mysql" health check
@@ -923,6 +923,19 @@ func (l *loadbalancers) makeUpdateHealthCheckRequest(backend *scwlb.Backend, nod
 			Method: healthCheckHTTPMethod,
 			Code:   &healthCheckHTTPCode,
 		}
+	case "https":
+		healthCheckHTTPURI := getHealthCheckHTTPURI(service)
+		healthCheckHTTPMethod := getHealthCheckHTTPMethod(service)
+		healthCheckHTTPCode, err := getHealthCheckHTTPCode(service)
+		if err != nil {
+			return nil, err
+		}
+		request.HTTPSConfig = &scwlb.HealthCheckHTTPSConfig{
+			URI:    healthCheckHTTPURI,
+			Method: healthCheckHTTPMethod,
+			Code:   &healthCheckHTTPCode,
+		}
+
 	default:
 		klog.Errorf("wrong value for healthCheckType")
 		return nil, NewAnnorationError(serviceAnnotationLoadBalancerHealthCheckType, healthCheckType)
@@ -1064,6 +1077,18 @@ func (l *loadbalancers) makeCreateBackendRequest(loadbalancer *scwlb.LB, nodePor
 			return nil, err
 		}
 		healthCheck.HTTPConfig = &scwlb.HealthCheckHTTPConfig{
+			URI:    healthCheckHTTPURI,
+			Method: healthCheckHTTPMethod,
+			Code:   &healthCheckHTTPCode,
+		}
+	case "https":
+		healthCheckHTTPURI := getHealthCheckHTTPURI(service)
+		healthCheckHTTPMethod := getHealthCheckHTTPMethod(service)
+		healthCheckHTTPCode, err := getHealthCheckHTTPCode(service)
+		if err != nil {
+			return nil, err
+		}
+		healthCheck.HTTPSConfig = &scwlb.HealthCheckHTTPSConfig{
 			URI:    healthCheckHTTPURI,
 			Method: healthCheckHTTPMethod,
 			Code:   &healthCheckHTTPCode,
@@ -1309,7 +1334,7 @@ func getHealthCheckType(service *v1.Service) (string, error) {
 		return "tcp", nil
 	}
 
-	if healthCheckType != "mysql" && healthCheckType != "ldap" && healthCheckType != "redis" && healthCheckType != "pgsql" && healthCheckType != "tcp" && healthCheckType != "http" {
+	if healthCheckType != "mysql" && healthCheckType != "ldap" && healthCheckType != "redis" && healthCheckType != "pgsql" && healthCheckType != "tcp" && healthCheckType != "http" && healthCheckType != "https" {
 		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerHealthCheckType)
 		return "", errLoadBalancerInvalidAnnotation
 	}
