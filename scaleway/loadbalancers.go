@@ -50,6 +50,7 @@ const (
 
 	// serviceAnnotationLoadBalancerHealthCheckType is the type of health check used
 	// The default value is "tcp" and the possible values are "tcp", "http", "https", "mysql", "pgsql", "redis" or "ldap"
+	// It is possible to set the type per port, like "80:http;443,8443:https"
 	// NB: depending on the type, some other annotations are required, see below
 	serviceAnnotationLoadBalancerHealthCheckType = "service.beta.kubernetes.io/scw-loadbalancer-health-check-type"
 
@@ -66,22 +67,27 @@ const (
 	serviceAnnotationLoadBalancerHealthCheckMaxRetries = "service.beta.kubernetes.io/scw-loadbalancer-health-check-max-retries"
 
 	// serviceAnnotationLoadBalancerHealthCheckHTTPURI is the URI that is used by the "http" health check
+	// It is possible to set the uri per port, like "80:/;443,8443:/healthz"
 	// NB: Required when setting service.beta.kubernetes.io/scw-loadbalancer-health-check-type to "http" or "https"
 	serviceAnnotationLoadBalancerHealthCheckHTTPURI = "service.beta.kubernetes.io/scw-loadbalancer-health-check-http-uri"
 
 	// serviceAnnotationLoadBalancerHealthCheckHTTPMethod is the HTTP method used by the "http" health check
+	// It is possible to set the method per port, like "80:GET;443,8443:POST"
 	// NB: Required when setting service.beta.kubernetes.io/scw-loadbalancer-health-check-type to "http" or "https"
 	serviceAnnotationLoadBalancerHealthCheckHTTPMethod = "service.beta.kubernetes.io/scw-loadbalancer-health-check-http-method"
 
 	// serviceAnnotationLoadBalancerHealthCheckHTTPCode is the HTTP code that the "http" health check will be matching against
+	// It is possible to set the code per port, like "80:404;443,8443:204"
 	// NB: Required when setting service.beta.kubernetes.io/scw-loadbalancer-health-check-type to "http" or "https"
 	serviceAnnotationLoadBalancerHealthCheckHTTPCode = "service.beta.kubernetes.io/scw-loadbalancer-health-check-http-code"
 
 	// serviceAnnotationLoadBalancerHealthCheckMysqlUser is the MySQL user used to check the MySQL connection when using the "mysql" health check
+	// It is possible to set the user per port, like "1234:root;3306,3307:mysql"
 	// NB: Required when setting service.beta.kubernetes.io/scw-loadbalancer-health-check-type to "mysql"
 	serviceAnnotationLoadBalancerHealthCheckMysqlUser = "service.beta.kubernetes.io/scw-loadbalancer-health-check-mysql-user"
 
 	// serviceAnnotationLoadBalancerHealthCheckPgsqlUser is the PgSQL user used to check the PgSQL connection when using the "pgsql" health check
+	// It is possible to set the user per port, like "1234:root;3306,3307:mysql"
 	// NB: Required when setting service.beta.kubernetes.io/scw-loadbalancer-health-check-type to "pgsql"
 	serviceAnnotationLoadBalancerHealthCheckPgsqlUser = "service.beta.kubernetes.io/scw-loadbalancer-health-check-pgsql-user"
 
@@ -905,53 +911,54 @@ func (l *loadbalancers) makeUpdateHealthCheckRequest(backend *scwlb.Backend, nod
 
 	request.CheckMaxRetries = healthCheckMaxRetries
 
-	healthCheckType, err := getHealthCheckType(service)
+	healthCheckType, err := getHealthCheckType(service, nodePort)
 	if err != nil {
 		return nil, err
 	}
 
 	switch healthCheckType {
 	case "mysql":
-		healthCheckMysqlUser := getHealthCheckMysqlUser(service)
-		request.MysqlConfig = &scwlb.HealthCheckMysqlConfig{
-			User: healthCheckMysqlUser,
+		hc, err := getMysqlHealthCheck(service, nodePort)
+		if err != nil {
+			return nil, err
 		}
+		request.MysqlConfig = hc
 	case "ldap":
-		request.LdapConfig = &scwlb.HealthCheckLdapConfig{}
+		hc, err := getLdapHealthCheck(service, nodePort)
+		if err != nil {
+			return nil, err
+		}
+		request.LdapConfig = hc
 	case "redis":
-		request.RedisConfig = &scwlb.HealthCheckRedisConfig{}
+		hc, err := getRedisHealthCheck(service, nodePort)
+		if err != nil {
+			return nil, err
+		}
+		request.RedisConfig = hc
 	case "pgsql":
-		healthCheckPgsqlUser := getHealthCheckPgsqlUser(service)
-		request.PgsqlConfig = &scwlb.HealthCheckPgsqlConfig{
-			User: healthCheckPgsqlUser,
+		hc, err := getPgsqlHealthCheck(service, nodePort)
+		if err != nil {
+			return nil, err
 		}
+		request.PgsqlConfig = hc
 	case "tcp":
-		request.TCPConfig = &scwlb.HealthCheckTCPConfig{}
+		hc, err := getTCPHealthCheck(service, nodePort)
+		if err != nil {
+			return nil, err
+		}
+		request.TCPConfig = hc
 	case "http":
-		healthCheckHTTPURI := getHealthCheckHTTPURI(service)
-		healthCheckHTTPMethod := getHealthCheckHTTPMethod(service)
-		healthCheckHTTPCode, err := getHealthCheckHTTPCode(service)
+		hc, err := getHTTPHealthCheck(service, nodePort)
 		if err != nil {
 			return nil, err
 		}
-		request.HTTPConfig = &scwlb.HealthCheckHTTPConfig{
-			URI:    healthCheckHTTPURI,
-			Method: healthCheckHTTPMethod,
-			Code:   &healthCheckHTTPCode,
-		}
+		request.HTTPConfig = hc
 	case "https":
-		healthCheckHTTPURI := getHealthCheckHTTPURI(service)
-		healthCheckHTTPMethod := getHealthCheckHTTPMethod(service)
-		healthCheckHTTPCode, err := getHealthCheckHTTPCode(service)
+		hc, err := getHTTPSHealthCheck(service, nodePort)
 		if err != nil {
 			return nil, err
 		}
-		request.HTTPSConfig = &scwlb.HealthCheckHTTPSConfig{
-			URI:    healthCheckHTTPURI,
-			Method: healthCheckHTTPMethod,
-			Code:   &healthCheckHTTPCode,
-		}
-
+		request.HTTPSConfig = hc
 	default:
 		klog.Errorf("wrong value for healthCheckType")
 		return nil, NewAnnorationError(serviceAnnotationLoadBalancerHealthCheckType, healthCheckType)
@@ -1063,52 +1070,54 @@ func (l *loadbalancers) makeCreateBackendRequest(loadbalancer *scwlb.LB, nodePor
 
 	healthCheck.CheckMaxRetries = healthCheckMaxRetries
 
-	healthCheckType, err := getHealthCheckType(service)
+	healthCheckType, err := getHealthCheckType(service, nodePort)
 	if err != nil {
 		return nil, err
 	}
 
 	switch healthCheckType {
 	case "mysql":
-		healthCheckMysqlUser := getHealthCheckMysqlUser(service)
-		healthCheck.MysqlConfig = &scwlb.HealthCheckMysqlConfig{
-			User: healthCheckMysqlUser,
+		hc, err := getMysqlHealthCheck(service, nodePort)
+		if err != nil {
+			return nil, err
 		}
+		healthCheck.MysqlConfig = hc
 	case "ldap":
-		healthCheck.LdapConfig = &scwlb.HealthCheckLdapConfig{}
+		hc, err := getLdapHealthCheck(service, nodePort)
+		if err != nil {
+			return nil, err
+		}
+		healthCheck.LdapConfig = hc
 	case "redis":
-		healthCheck.RedisConfig = &scwlb.HealthCheckRedisConfig{}
+		hc, err := getRedisHealthCheck(service, nodePort)
+		if err != nil {
+			return nil, err
+		}
+		healthCheck.RedisConfig = hc
 	case "pgsql":
-		healthCheckPgsqlUser := getHealthCheckPgsqlUser(service)
-		healthCheck.PgsqlConfig = &scwlb.HealthCheckPgsqlConfig{
-			User: healthCheckPgsqlUser,
+		hc, err := getPgsqlHealthCheck(service, nodePort)
+		if err != nil {
+			return nil, err
 		}
+		healthCheck.PgsqlConfig = hc
 	case "tcp":
-		healthCheck.TCPConfig = &scwlb.HealthCheckTCPConfig{}
+		hc, err := getTCPHealthCheck(service, nodePort)
+		if err != nil {
+			return nil, err
+		}
+		healthCheck.TCPConfig = hc
 	case "http":
-		healthCheckHTTPURI := getHealthCheckHTTPURI(service)
-		healthCheckHTTPMethod := getHealthCheckHTTPMethod(service)
-		healthCheckHTTPCode, err := getHealthCheckHTTPCode(service)
+		hc, err := getHTTPHealthCheck(service, nodePort)
 		if err != nil {
 			return nil, err
 		}
-		healthCheck.HTTPConfig = &scwlb.HealthCheckHTTPConfig{
-			URI:    healthCheckHTTPURI,
-			Method: healthCheckHTTPMethod,
-			Code:   &healthCheckHTTPCode,
-		}
+		healthCheck.HTTPConfig = hc
 	case "https":
-		healthCheckHTTPURI := getHealthCheckHTTPURI(service)
-		healthCheckHTTPMethod := getHealthCheckHTTPMethod(service)
-		healthCheckHTTPCode, err := getHealthCheckHTTPCode(service)
+		hc, err := getHTTPSHealthCheck(service, nodePort)
 		if err != nil {
 			return nil, err
 		}
-		healthCheck.HTTPSConfig = &scwlb.HealthCheckHTTPSConfig{
-			URI:    healthCheckHTTPURI,
-			Method: healthCheckHTTPMethod,
-			Code:   &healthCheckHTTPCode,
-		}
+		healthCheck.HTTPSConfig = hc
 	default:
 		klog.Errorf("wrong value for healthCheckType")
 		return nil, errLoadBalancerInvalidAnnotation
@@ -1344,20 +1353,6 @@ func getOnMarkedDownAction(service *v1.Service) (scwlb.OnMarkedDownAction, error
 	return onMarkedDownActionValue, nil
 }
 
-func getHealthCheckType(service *v1.Service) (string, error) {
-	healthCheckType, ok := service.Annotations[serviceAnnotationLoadBalancerHealthCheckType]
-	if !ok {
-		return "tcp", nil
-	}
-
-	if healthCheckType != "mysql" && healthCheckType != "ldap" && healthCheckType != "redis" && healthCheckType != "pgsql" && healthCheckType != "tcp" && healthCheckType != "http" && healthCheckType != "https" {
-		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerHealthCheckType)
-		return "", errLoadBalancerInvalidAnnotation
-	}
-
-	return healthCheckType, nil
-}
-
 func getHealthCheckDelay(service *v1.Service) (time.Duration, error) {
 	healthCheckDelay, ok := service.Annotations[serviceAnnotationLoadBalancerHealthCheckDelay]
 	if !ok {
@@ -1401,53 +1396,6 @@ func getHealthCheckMaxRetries(service *v1.Service) (int32, error) {
 	}
 
 	return int32(healthCheckMaxRetriesInt), nil
-}
-
-func getHealthCheckHTTPCode(service *v1.Service) (int32, error) {
-	healthCheckHTTPCode, ok := service.Annotations[serviceAnnotationLoadBalancerHealthCheckHTTPCode]
-	if !ok {
-		return 200, nil
-	}
-
-	healthCheckHTTPCodeInt, err := strconv.Atoi(healthCheckHTTPCode)
-	if err != nil {
-		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerHealthCheckHTTPCode)
-		return 0, errLoadBalancerInvalidAnnotation
-	}
-
-	return int32(healthCheckHTTPCodeInt), nil
-}
-
-func getHealthCheckHTTPURI(service *v1.Service) string {
-	healthCheckHTTPURI, ok := service.Annotations[serviceAnnotationLoadBalancerHealthCheckHTTPURI]
-	if !ok {
-		return "/"
-	}
-	return healthCheckHTTPURI
-}
-
-func getHealthCheckHTTPMethod(service *v1.Service) string {
-	healthCheckHTTPMethod, ok := service.Annotations[serviceAnnotationLoadBalancerHealthCheckHTTPMethod]
-	if !ok {
-		return "GET"
-	}
-	return healthCheckHTTPMethod
-}
-
-func getHealthCheckMysqlUser(service *v1.Service) string {
-	healthCheckMysqlUser, ok := service.Annotations[serviceAnnotationLoadBalancerHealthCheckMysqlUser]
-	if !ok {
-		return ""
-	}
-	return healthCheckMysqlUser
-}
-
-func getHealthCheckPgsqlUser(service *v1.Service) string {
-	healthCheckPgsqlUser, ok := service.Annotations[serviceAnnotationLoadBalancerHealthCheckPgsqlUser]
-	if !ok {
-		return ""
-	}
-	return healthCheckPgsqlUser
 }
 
 func getForceInternalIP(service *v1.Service) bool {
@@ -1537,4 +1485,192 @@ func getCertificateIDs(service *v1.Service, port int32) ([]string, error) {
 	}
 
 	return ids, nil
+}
+
+func getValueForPort(service *v1.Service, nodePort int32, fullValue string) (string, error) {
+	var svcPort int32 = -1
+	for _, p := range service.Spec.Ports {
+		if p.NodePort == nodePort {
+			svcPort = p.Port
+		}
+	}
+
+	value := ""
+
+	for _, perPort := range strings.Split(fullValue, ";") {
+		split := strings.Split(perPort, ":")
+		if len(split) == 1 {
+			if value == "" {
+				value = split[0]
+			}
+			continue
+		}
+		if len(split) > 2 {
+			return "", fmt.Errorf("annotation with value %s is wrongly formatted, should be `port1:value1;port2,port3:value2`", fullValue)
+		}
+		inRange, err := isPortInRange(split[0], svcPort)
+		if err != nil {
+			klog.Errorf("unable to check if port %d is in range %s", svcPort, split[0])
+			return "", err
+		}
+		if inRange {
+			value = split[1]
+		}
+	}
+
+	return value, nil
+}
+
+func getHealthCheckType(service *v1.Service, nodePort int32) (string, error) {
+	annotation, ok := service.Annotations[serviceAnnotationLoadBalancerHealthCheckType]
+	if !ok {
+		return "tcp", nil
+	}
+
+	hcValue, err := getValueForPort(service, nodePort, annotation)
+	if err != nil {
+		klog.Errorf("could not get value for annotation %s and port %d", serviceAnnotationLoadBalancerHealthCheckType, nodePort)
+		return "", err
+	}
+
+	return hcValue, nil
+}
+
+func getRedisHealthCheck(service *v1.Service, nodePort int32) (*scwlb.HealthCheckRedisConfig, error) {
+	return &scwlb.HealthCheckRedisConfig{}, nil
+}
+
+func getLdapHealthCheck(service *v1.Service, nodePort int32) (*scwlb.HealthCheckLdapConfig, error) {
+	return &scwlb.HealthCheckLdapConfig{}, nil
+}
+
+func getTCPHealthCheck(service *v1.Service, nodePort int32) (*scwlb.HealthCheckTCPConfig, error) {
+	return &scwlb.HealthCheckTCPConfig{}, nil
+}
+
+func getPgsqlHealthCheck(service *v1.Service, nodePort int32) (*scwlb.HealthCheckPgsqlConfig, error) {
+	annotation, ok := service.Annotations[serviceAnnotationLoadBalancerHealthCheckPgsqlUser]
+	if !ok {
+		return nil, nil
+	}
+
+	user, err := getValueForPort(service, nodePort, annotation)
+	if err != nil {
+		klog.Errorf("could not get value for annotation %s and port %d", serviceAnnotationLoadBalancerHealthCheckPgsqlUser, nodePort)
+		return nil, err
+	}
+
+	return &scwlb.HealthCheckPgsqlConfig{
+		User: user,
+	}, nil
+}
+
+func getMysqlHealthCheck(service *v1.Service, nodePort int32) (*scwlb.HealthCheckMysqlConfig, error) {
+	annotation, ok := service.Annotations[serviceAnnotationLoadBalancerHealthCheckMysqlUser]
+	if !ok {
+		return nil, nil
+	}
+
+	user, err := getValueForPort(service, nodePort, annotation)
+	if err != nil {
+		klog.Errorf("could not get value for annotation %s and port %d", serviceAnnotationLoadBalancerHealthCheckMysqlUser, nodePort)
+		return nil, err
+	}
+
+	return &scwlb.HealthCheckMysqlConfig{
+		User: user,
+	}, nil
+}
+
+func getHTTPHealthCheckCode(service *v1.Service, nodePort int32) (int32, error) {
+	annotation, ok := service.Annotations[serviceAnnotationLoadBalancerHealthCheckHTTPCode]
+	if !ok {
+		return 200, nil
+	}
+
+	stringCode, err := getValueForPort(service, nodePort, annotation)
+	if err != nil {
+		klog.Errorf("could not get value for annotation %s and port %d", serviceAnnotationLoadBalancerHealthCheckHTTPCode, nodePort)
+		return 0, err
+	}
+
+	code, err := strconv.Atoi(stringCode)
+	if err != nil {
+		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerHealthCheckHTTPCode)
+		return 0, errLoadBalancerInvalidAnnotation
+	}
+
+	return int32(code), nil
+}
+
+func getHTTPHealthCheckURI(service *v1.Service, nodePort int32) (string, error) {
+	annotation, ok := service.Annotations[serviceAnnotationLoadBalancerHealthCheckHTTPURI]
+	if !ok {
+		return "/", nil
+	}
+
+	uri, err := getValueForPort(service, nodePort, annotation)
+	if err != nil {
+		klog.Errorf("could not get value for annotation %s and port %d", serviceAnnotationLoadBalancerHealthCheckHTTPURI, nodePort)
+		return "", err
+	}
+
+	return uri, nil
+}
+
+func getHTTPHealthCheckMethod(service *v1.Service, nodePort int32) (string, error) {
+	annotation, ok := service.Annotations[serviceAnnotationLoadBalancerHealthCheckHTTPMethod]
+	if !ok {
+		return "GET", nil
+	}
+
+	method, err := getValueForPort(service, nodePort, annotation)
+	if err != nil {
+		klog.Errorf("could not get value for annotation %s and port %d", serviceAnnotationLoadBalancerHealthCheckHTTPMethod, nodePort)
+		return "", err
+	}
+
+	return method, nil
+}
+
+func getHTTPHealthCheck(service *v1.Service, nodePort int32) (*scwlb.HealthCheckHTTPConfig, error) {
+	code, err := getHTTPHealthCheckCode(service, nodePort)
+	if err != nil {
+		return nil, err
+	}
+	uri, err := getHTTPHealthCheckURI(service, nodePort)
+	if err != nil {
+		return nil, err
+	}
+	method, err := getHTTPHealthCheckMethod(service, nodePort)
+	if err != nil {
+		return nil, err
+	}
+
+	return &scwlb.HealthCheckHTTPConfig{
+		Method: method,
+		Code:   &code,
+		URI:    uri,
+	}, nil
+}
+
+func getHTTPSHealthCheck(service *v1.Service, nodePort int32) (*scwlb.HealthCheckHTTPSConfig, error) {
+	code, err := getHTTPHealthCheckCode(service, nodePort)
+	if err != nil {
+		return nil, err
+	}
+	uri, err := getHTTPHealthCheckURI(service, nodePort)
+	if err != nil {
+		return nil, err
+	}
+	method, err := getHTTPHealthCheckMethod(service, nodePort)
+	if err != nil {
+		return nil, err
+	}
+
+	return &scwlb.HealthCheckHTTPSConfig{
+		Method: method,
+		Code:   &code,
+		URI:    uri,
+	}, nil
 }
