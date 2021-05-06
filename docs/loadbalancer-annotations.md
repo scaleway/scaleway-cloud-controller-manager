@@ -43,7 +43,8 @@ NB: muste be set if `service.beta.kubernetes.io/scw-loadbalancer-sticky-sessions
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-health-check-type`
 This is the type of health check used.
-The default value is `tcp` and the possible values are `tcp`, `http`, `mysql`, `pgsql`, `redis` or `ldap`.
+The default value is `tcp` and the possible values are `tcp`, `http`, `https`, `mysql`, `pgsql`, `redis` or `ldap`.
+It is possible to set the type per port, like `80:http;443,8443:https`.
 NB: depending on the type, some other annotations are required, see below.
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-health-check-delay`
@@ -60,22 +61,27 @@ The default value is `10`.
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-health-check-http-uri`
 This is the annotation to set the URI that is used by the `http` health check.
-NB: Required when setting service.beta.kubernetes.io/scw-loadbalancer-health-check-type to `http`.
+It is possible to set the uri per port, like `80:/;443,8443:/healthz`.
+NB: Required when setting service.beta.kubernetes.io/scw-loadbalancer-health-check-type to `http` or `https`.
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-health-check-http-method`
 This is the annotation to set the HTTP method used by the `http` health check.
-NB: Required when setting service.beta.kubernetes.io/scw-loadbalancer-health-check-type to `http`.
+It is possible to set the method per port, like `80:GET;443,8443:POST`.
+NB: Required when setting service.beta.kubernetes.io/scw-loadbalancer-health-check-type to `http` or `https`.
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-health-check-http-code`
 This is the annotation to set the HTTP code that the `http` health check will be matching against.
-NB: Required when setting service.beta.kubernetes.io/scw-loadbalancer-health-check-type to `http`.
+It is possible to set the code per port, like `80:404;443,8443:204`.
+NB: Required when setting service.beta.kubernetes.io/scw-loadbalancer-health-check-type to `http` or `https`.
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-health-check-mysql-user`
 This is the annotation to set the MySQL user used to check the MySQL connection when using the `mysql` health check,
+It is possible to set the user per port, like `1234:root;3306,3307:mysql`.
 NB: Required when setting service.beta.kubernetes.io/scw-loadbalancer-health-check-type to `mysql`.
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-health-check-pgsql-user`
 This is the annotation to set the PgSQL user used to check the PgSQL connection when using the `pgsql` health check.
+It is possible to set the user per port, like `1234:root;3306,3307:mysql`.
 NB: Required when setting service.beta.kubernetes.io/scw-loadbalancer-health-check-type to `pgsql`.
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-proxy-protocol-v1`
