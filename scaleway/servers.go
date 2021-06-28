@@ -15,6 +15,12 @@ import (
 const (
 	InstanceTypeInstance = "instance"
 	InstanceTypeBaremtal = "baremetal"
+
+	// nodeLabelDisableLifeCycle is a label for nulling cloudprovider.InstancesV2 interface
+	nodeLabelDisableLifeCycle = "k8s.scw.cloud/disable-lifcycle"
+
+	// nodeAnnotationNodePublicIP is an annotation to override External-IP of a node
+	nodeLabelNodePublicIP = "k8s.scw.cloud/node-public-ip"
 )
 
 type Servers interface {
@@ -167,6 +173,10 @@ func (s *servers) GetZoneByNodeName(ctx context.Context, nodeName types.NodeName
 // InstanceExists returns true if the instance for the given node exists according to the cloud provider.
 // Use the node.name or node.spec.providerID field to find the node in the cloud provider.
 func (s *servers) InstanceExists(ctx context.Context, node *v1.Node) (bool, error) {
+	if _, ok := node.Annotations[nodeLabelDisableLifeCycle]; ok {
+		return true, nil
+	}
+
 	if node.Spec.ProviderID == "" {
 		exists, err := s.instances.InstanceExists(ctx, node)
 		if err != nil {
@@ -183,6 +193,10 @@ func (s *servers) InstanceExists(ctx context.Context, node *v1.Node) (bool, erro
 // InstanceShutdown returns true if the instance is shutdown according to the cloud provider.
 // Use the node.name or node.spec.providerID field to find the node in the cloud provider.
 func (s *servers) InstanceShutdown(ctx context.Context, node *v1.Node) (bool, error) {
+	if _, ok := node.Annotations[nodeLabelDisableLifeCycle]; ok {
+		return false, nil
+	}
+
 	if node.Spec.ProviderID == "" {
 		shutdown, err := s.instances.InstanceShutdown(ctx, node)
 		if err == cloudprovider.InstanceNotFound {
@@ -197,6 +211,15 @@ func (s *servers) InstanceShutdown(ctx context.Context, node *v1.Node) (bool, er
 // translated into specific fields in the Node object on registration.
 // Use the node.name or node.spec.providerID field to find the node in the cloud provider.
 func (s *servers) InstanceMetadata(ctx context.Context, node *v1.Node) (*cloudprovider.InstanceMetadata, error) {
+	if address, ok := node.Annotations[nodeLabelNodePublicIP]; ok {
+		return &cloudprovider.InstanceMetadata{
+			NodeAddresses: []v1.NodeAddress{{
+				Type:    v1.NodeExternalIP,
+				Address: address,
+			}},
+		}, nil
+	}
+
 	if node.Spec.ProviderID == "" {
 		metadata, err := s.instances.InstanceMetadata(ctx, node)
 		if err == cloudprovider.InstanceNotFound {
