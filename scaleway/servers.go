@@ -212,11 +212,18 @@ func (s *servers) InstanceShutdown(ctx context.Context, node *v1.Node) (bool, er
 // Use the node.name or node.spec.providerID field to find the node in the cloud provider.
 func (s *servers) InstanceMetadata(ctx context.Context, node *v1.Node) (*cloudprovider.InstanceMetadata, error) {
 	if address, ok := node.Labels[nodeLabelNodePublicIP]; ok {
+		addresses := []v1.NodeAddress{
+			{Type: v1.NodeExternalIP, Address: address},
+		}
+
+		for _, address := range node.Status.Addresses {
+			if address.Type != v1.NodeExternalIP {
+				addresses = append(addresses, address)
+			}
+		}
+
 		return &cloudprovider.InstanceMetadata{
-			NodeAddresses: []v1.NodeAddress{{
-				Type:    v1.NodeExternalIP,
-				Address: address,
-			}},
+			NodeAddresses: addresses,
 		}, nil
 	}
 
