@@ -17,7 +17,7 @@ const (
 	InstanceTypeBaremtal = "baremetal"
 
 	// nodeLabelDisableLifeCycle is a label for nulling cloudprovider.InstancesV2 interface
-	nodeLabelDisableLifeCycle = "k8s.scw.cloud/disable-lifcycle"
+	nodeLabelDisableLifeCycle = "k8s.scw.cloud/disable-lifecycle"
 
 	// nodeLabelNodePublicIP is a label to override External-IP of a node
 	nodeLabelNodePublicIP = "k8s.scw.cloud/node-public-ip"
