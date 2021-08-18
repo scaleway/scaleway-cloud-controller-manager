@@ -479,8 +479,8 @@ github.com/russross/blackfriday v0.0.0-20170610170232-067529f716f4/go.mod h1:JO/
 github.com/russross/blackfriday v1.5.2/go.mod h1:JO/DiYxRf+HjHt06OyowR9PTA263kcR/rfWxYHBV53g=
 github.com/russross/blackfriday/v2 v2.0.1/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=
 github.com/satori/go.uuid v1.2.0/go.mod h1:dA0hQrYB0VpLJoorglMZABFdXlWrHn1NEOzdhQKdks0=
-github.com/scaleway/scaleway-sdk-go v1.0.0-beta.6.0.20200820094136-e5e36003a999 h1:JfTFkJt8n60HtsfHw5e6A1gim8W2kQ57uOXLLQES40w=
-github.com/scaleway/scaleway-sdk-go v1.0.0-beta.6.0.20200820094136-e5e36003a999/go.mod h1:CJJ5VAbozOl0yEw7nHB9+7BXTJbIn6h7W+f6Gau5IP8=
+github.com/scaleway/scaleway-sdk-go v1.0.0-beta.7.0.20210817142252-2836d8ffcc09 h1:yhJDl3IfiMEtenYzmBE8txehmXD9jztfUTtpdLb/WYU=
+github.com/scaleway/scaleway-sdk-go v1.0.0-beta.7.0.20210817142252-2836d8ffcc09/go.mod h1:CJJ5VAbozOl0yEw7nHB9+7BXTJbIn6h7W+f6Gau5IP8=
 github.com/seccomp/libseccomp-golang v0.9.1/go.mod h1:GbW5+tmTXfcxTToHLXlScSlAvWlF4P2Ca7zGrPiEpWo=
 github.com/sergi/go-diff v1.0.0/go.mod h1:0CfEIISq7TuYL3j771MWULgwwjU+GofnZX9QAmXWZgo=
 github.com/shurcooL/sanitized_anchor_name v1.0.0/go.mod h1:1NzhyTcUVG4SuEtjjoZeVRXNmyL/1OwPU0+IJeTBvfc=
