@@ -25,8 +25,8 @@ Note:
 - If an annotation is not specified, the cloud controller manager will apply default configuration.  
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-id`
-This annotation is the ID of the loadbalancer to use. It is populated by the CCM with the new LB ID if it doesn't exist.
-It has the form `<region>/<lb-id>`.
+This annotation is the ID of the loadbalancer to use. It is populated by the CCM with the new LB ID if the annotation does not exist.
+It has the form `<zone>/<lb-id>`.
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-forward-port-algorithm`
 This is the annotation to choose the load balancing algorithm.
