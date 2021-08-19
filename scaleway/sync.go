@@ -94,7 +94,7 @@ func newSyncController(client *client, clientset clientset.Interface, cacheUpdat
 		client:            client,
 		clientSet:         clientset,
 		instanceAPI:       instance.NewAPI(client.scaleway),
-		lbAPI:             lb.NewAPI(client.scaleway),
+		lbAPI:             lb.NewZonedAPI(client.scaleway),
 		nodeIndexer:       nodeIndexer,
 		nodeController:    nodeController,
 		serviceIndexer:    serviceIndexer,
@@ -288,15 +288,15 @@ func (s *syncController) SyncLBTags() {
 			continue
 		}
 
-		region, loadBalancerID, err := getLoadBalancerID(svc)
+		zone, loadBalancerID, err := getLoadBalancerID(svc)
 		if err != nil || loadBalancerID == "" {
 			klog.Warningf("service %s/%s does not have loadbalancer ID as annotation yet, skipping", svc.Namespace, svc.Name)
 			continue
 		}
 
-		loadbalancer, err := s.lbAPI.GetLB(&lb.GetLBRequest{
-			Region: region,
-			LBID:   loadBalancerID,
+		loadbalancer, err := s.lbAPI.GetLB(&lb.ZonedAPIGetLBRequest{
+			Zone: zone,
+			LBID: loadBalancerID,
 		})
 		if err != nil {
 			klog.Errorf("error getting lb: %v", err)
