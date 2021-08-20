@@ -27,6 +27,7 @@ import (
 
 	scwlb "github.com/scaleway/scaleway-sdk-go/api/lb/v1"
 	"github.com/scaleway/scaleway-sdk-go/scw"
+	"github.com/scaleway/scaleway-sdk-go/validation"
 	"golang.org/x/xerrors"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/klog"
@@ -34,7 +35,7 @@ import (
 
 const (
 	// serviceAnnotationLoadBalancerID is the ID of the loadbalancer
-	// It has the form <region>/<lb-id>
+	// It has the form <zone>/<lb-id>
 	serviceAnnotationLoadBalancerID = "service.beta.kubernetes.io/scw-loadbalancer-id"
 
 	// serviceAnnotationLoadBalancerForwardPortAlgorithm is the annotation to choose the load balancing algorithm
@@ -106,6 +107,9 @@ const (
 	// serviceAnnotationLoadBalancerType is the load balancer offer type
 	serviceAnnotationLoadBalancerType = "service.beta.kubernetes.io/scw-loadbalancer-type"
 
+	// serviceAnnotationLoadBalancerZone is the zone to create the load balancer
+	serviceAnnotationLoadBalancerZone = "service.beta.kubernetes.io/scw-loadbalancer-zone"
+
 	// serviceAnnotationLoadBalancerTimeoutServer is the maximum server connection inactivity time
 	// The default value is "10m". The duration are go's time.Duration (ex: "1s", "2m", "4h", ...)
 	serviceAnnotationLoadBalancerTimeoutServer = "service.beta.kubernetes.io/scw-loadbalancer-timeout-server"
@@ -137,31 +141,31 @@ type loadbalancers struct {
 }
 
 type LoadBalancerAPI interface {
-	ListLBs(req *scwlb.ListLBsRequest, opts ...scw.RequestOption) (*scwlb.ListLBsResponse, error)
-	GetLB(req *scwlb.GetLBRequest, opts ...scw.RequestOption) (*scwlb.LB, error)
-	CreateLB(req *scwlb.CreateLBRequest, opts ...scw.RequestOption) (*scwlb.LB, error)
-	DeleteLB(req *scwlb.DeleteLBRequest, opts ...scw.RequestOption) error
-	MigrateLB(req *scwlb.MigrateLBRequest, opts ...scw.RequestOption) (*scwlb.LB, error)
-	ListIPs(req *scwlb.ListIPsRequest, opts ...scw.RequestOption) (*scwlb.ListIPsResponse, error)
-	ListBackends(req *scwlb.ListBackendsRequest, opts ...scw.RequestOption) (*scwlb.ListBackendsResponse, error)
-	CreateBackend(req *scwlb.CreateBackendRequest, opts ...scw.RequestOption) (*scwlb.Backend, error)
-	UpdateBackend(req *scwlb.UpdateBackendRequest, opts ...scw.RequestOption) (*scwlb.Backend, error)
-	DeleteBackend(req *scwlb.DeleteBackendRequest, opts ...scw.RequestOption) error
-	SetBackendServers(req *scwlb.SetBackendServersRequest, opts ...scw.RequestOption) (*scwlb.Backend, error)
-	UpdateHealthCheck(req *scwlb.UpdateHealthCheckRequest, opts ...scw.RequestOption) (*scwlb.HealthCheck, error)
-	ListFrontends(req *scwlb.ListFrontendsRequest, opts ...scw.RequestOption) (*scwlb.ListFrontendsResponse, error)
-	CreateFrontend(req *scwlb.CreateFrontendRequest, opts ...scw.RequestOption) (*scwlb.Frontend, error)
-	UpdateFrontend(req *scwlb.UpdateFrontendRequest, opts ...scw.RequestOption) (*scwlb.Frontend, error)
-	DeleteFrontend(req *scwlb.DeleteFrontendRequest, opts ...scw.RequestOption) error
-	ListACLs(req *scwlb.ListACLsRequest, opts ...scw.RequestOption) (*scwlb.ListACLResponse, error)
-	CreateACL(req *scwlb.CreateACLRequest, opts ...scw.RequestOption) (*scwlb.ACL, error)
-	DeleteACL(req *scwlb.DeleteACLRequest, opts ...scw.RequestOption) error
-	UpdateACL(req *scwlb.UpdateACLRequest, opts ...scw.RequestOption) (*scwlb.ACL, error)
+	ListLBs(req *scwlb.ZonedAPIListLBsRequest, opts ...scw.RequestOption) (*scwlb.ListLBsResponse, error)
+	GetLB(req *scwlb.ZonedAPIGetLBRequest, opts ...scw.RequestOption) (*scwlb.LB, error)
+	CreateLB(req *scwlb.ZonedAPICreateLBRequest, opts ...scw.RequestOption) (*scwlb.LB, error)
+	DeleteLB(req *scwlb.ZonedAPIDeleteLBRequest, opts ...scw.RequestOption) error
+	MigrateLB(req *scwlb.ZonedAPIMigrateLBRequest, opts ...scw.RequestOption) (*scwlb.LB, error)
+	ListIPs(req *scwlb.ZonedAPIListIPsRequest, opts ...scw.RequestOption) (*scwlb.ListIPsResponse, error)
+	ListBackends(req *scwlb.ZonedAPIListBackendsRequest, opts ...scw.RequestOption) (*scwlb.ListBackendsResponse, error)
+	CreateBackend(req *scwlb.ZonedAPICreateBackendRequest, opts ...scw.RequestOption) (*scwlb.Backend, error)
+	UpdateBackend(req *scwlb.ZonedAPIUpdateBackendRequest, opts ...scw.RequestOption) (*scwlb.Backend, error)
+	DeleteBackend(req *scwlb.ZonedAPIDeleteBackendRequest, opts ...scw.RequestOption) error
+	SetBackendServers(req *scwlb.ZonedAPISetBackendServersRequest, opts ...scw.RequestOption) (*scwlb.Backend, error)
+	UpdateHealthCheck(req *scwlb.ZonedAPIUpdateHealthCheckRequest, opts ...scw.RequestOption) (*scwlb.HealthCheck, error)
+	ListFrontends(req *scwlb.ZonedAPIListFrontendsRequest, opts ...scw.RequestOption) (*scwlb.ListFrontendsResponse, error)
+	CreateFrontend(req *scwlb.ZonedAPICreateFrontendRequest, opts ...scw.RequestOption) (*scwlb.Frontend, error)
+	UpdateFrontend(req *scwlb.ZonedAPIUpdateFrontendRequest, opts ...scw.RequestOption) (*scwlb.Frontend, error)
+	DeleteFrontend(req *scwlb.ZonedAPIDeleteFrontendRequest, opts ...scw.RequestOption) error
+	ListACLs(req *scwlb.ZonedAPIListACLsRequest, opts ...scw.RequestOption) (*scwlb.ListACLResponse, error)
+	CreateACL(req *scwlb.ZonedAPICreateACLRequest, opts ...scw.RequestOption) (*scwlb.ACL, error)
+	DeleteACL(req *scwlb.ZonedAPIDeleteACLRequest, opts ...scw.RequestOption) error
+	UpdateACL(req *scwlb.ZonedAPIUpdateACLRequest, opts ...scw.RequestOption) (*scwlb.ACL, error)
 }
 
 func newLoadbalancers(client *client) *loadbalancers {
 	return &loadbalancers{
-		api:    scwlb.NewAPI(client.scaleway),
+		api:    scwlb.NewZonedAPI(client.scaleway),
 		client: client,
 	}
 }
@@ -305,7 +309,8 @@ func (l *loadbalancers) deleteLoadBalancer(ctx context.Context, lb *scwlb.LB, se
 	// if loadBalancerIP is not set, it implies an ephemeral IP
 	releaseIP := service.Spec.LoadBalancerIP == ""
 
-	request := &scwlb.DeleteLBRequest{
+	request := &scwlb.ZonedAPIDeleteLBRequest{
+		Zone:      lb.Zone,
 		LBID:      lb.ID,
 		ReleaseIP: releaseIP,
 	}
@@ -365,14 +370,14 @@ func extractNodesInternalIps(nodes []*v1.Node) []string {
 }
 
 func (l *loadbalancers) fetchLoadBalancer(ctx context.Context, clusterName string, service *v1.Service) (*scwlb.LB, error) {
-	if region, loadBalancerID, err := getLoadBalancerID(service); loadBalancerID != "" {
+	if zone, loadBalancerID, err := getLoadBalancerID(service); loadBalancerID != "" {
 		if err != nil {
 			return nil, err
 		}
 
-		resp, err := l.api.GetLB(&scwlb.GetLBRequest{
-			LBID:   loadBalancerID,
-			Region: region,
+		resp, err := l.api.GetLB(&scwlb.ZonedAPIGetLBRequest{
+			LBID: loadBalancerID,
+			Zone: zone,
 		})
 		if err != nil {
 			var respErr *scw.ResponseError
@@ -380,7 +385,7 @@ func (l *loadbalancers) fetchLoadBalancer(ctx context.Context, clusterName strin
 				return nil, LoadBalancerNotFound
 			}
 
-			klog.Errorf("an error occurred while fetching loadbalancer '%s/%s' for service '%s/%s'", region, loadBalancerID, service.Namespace, service.Name)
+			klog.Errorf("an error occurred while fetching loadbalancer '%s/%s' for service '%s/%s'", zone, loadBalancerID, service.Namespace, service.Name)
 			return nil, err
 		}
 
@@ -395,10 +400,10 @@ func (l *loadbalancers) getLoadbalancerByName(ctx context.Context, service *v1.S
 	name := l.GetLoadBalancerName(ctx, "", service)
 
 	var loadbalancer *scwlb.LB
-	for _, region := range scw.AllRegions {
-		resp, err := l.api.ListLBs(&scwlb.ListLBsRequest{
-			Name:   &name,
-			Region: region,
+	for _, zone := range scw.AllZones {
+		resp, err := l.api.ListLBs(&scwlb.ZonedAPIListLBsRequest{
+			Zone: zone,
+			Name: &name,
 		}, scw.WithAllPages())
 		if err != nil {
 			var respErr *scw.ResponseError
@@ -443,8 +448,9 @@ func (l *loadbalancers) createLoadBalancer(ctx context.Context, clusterName stri
 
 	var ipID *string
 	if service.Spec.LoadBalancerIP != "" {
-		request := scwlb.ListIPsRequest{
+		request := scwlb.ZonedAPIListIPsRequest{
 			IPAddress: &service.Spec.LoadBalancerIP,
+			Zone:      getLoadBalancerZone(service),
 		}
 		ipsResp, err := l.api.ListIPs(&request)
 		if err != nil {
@@ -471,7 +477,8 @@ func (l *loadbalancers) createLoadBalancer(ctx context.Context, clusterName stri
 	tags = append(tags, "managed-by-scaleway-cloud-controller-manager")
 	lbName := l.GetLoadBalancerName(ctx, clusterName, service)
 
-	request := scwlb.CreateLBRequest{
+	request := scwlb.ZonedAPICreateLBRequest{
+		Zone:        getLoadBalancerZone(service),
 		Name:        lbName,
 		Description: "kubernetes service " + service.Name,
 		Tags:        tags,
@@ -505,7 +512,7 @@ func (l *loadbalancers) annotateAndPatch(service *v1.Service, loadbalancer *scwl
 	if service.ObjectMeta.Annotations == nil {
 		service.ObjectMeta.Annotations = map[string]string{}
 	}
-	service.ObjectMeta.Annotations[serviceAnnotationLoadBalancerID] = loadbalancer.Region.String() + "/" + loadbalancer.ID
+	service.ObjectMeta.Annotations[serviceAnnotationLoadBalancerID] = loadbalancer.Zone.String() + "/" + loadbalancer.ID
 
 	return patcher.Patch()
 }
@@ -523,7 +530,8 @@ func (l *loadbalancers) unannotateAndPatch(service *v1.Service) error {
 
 func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *scwlb.LB, service *v1.Service, nodes []*v1.Node) error {
 	// List all frontends associated with the LB
-	respFrontends, err := l.api.ListFrontends(&scwlb.ListFrontendsRequest{
+	respFrontends, err := l.api.ListFrontends(&scwlb.ZonedAPIListFrontendsRequest{
+		Zone: loadbalancer.Zone,
 		LBID: loadbalancer.ID,
 	}, scw.WithAllPages())
 
@@ -553,7 +561,8 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 			// if the frontend is not valid anymore, delete it
 			klog.Infof("deleting frontend: %s", frontend.ID)
 
-			err := l.api.DeleteFrontend(&scwlb.DeleteFrontendRequest{
+			err := l.api.DeleteFrontend(&scwlb.ZonedAPIDeleteFrontendRequest{
+				Zone:       loadbalancer.Zone,
 				FrontendID: frontend.ID,
 			})
 
@@ -571,7 +580,8 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 	}
 
 	// List all backends associated with the LB
-	respBackends, err := l.api.ListBackends(&scwlb.ListBackendsRequest{
+	respBackends, err := l.api.ListBackends(&scwlb.ZonedAPIListBackendsRequest{
+		Zone: loadbalancer.Zone,
 		LBID: loadbalancer.ID,
 	}, scw.WithAllPages())
 
@@ -599,7 +609,8 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 
 		if !keep {
 			// if the backend is not valid, delete it
-			err := l.api.DeleteBackend(&scwlb.DeleteBackendRequest{
+			err := l.api.DeleteBackend(&scwlb.ZonedAPIDeleteBackendRequest{
+				Zone:      loadbalancer.Zone,
 				BackendID: backend.ID,
 			})
 
@@ -626,6 +637,7 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 				return err
 			}
 
+			updateBackendRequest.Zone = loadbalancer.Zone
 			updateBackendRequest.ForwardPort = port.NodePort
 			_, err = l.api.UpdateBackend(updateBackendRequest)
 			if err != nil {
@@ -644,6 +656,7 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 				return err
 			}
 
+			updateHealthCheckRequest.Zone = loadbalancer.Zone
 			_, err = l.api.UpdateHealthCheck(updateHealthCheckRequest)
 			if err != nil {
 				klog.Errorf("error updating healthcheck: %v", err)
@@ -662,7 +675,8 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 				serverIPs = extractNodesExternalIps(nodes)
 			}
 
-			setBackendServersRequest := &scwlb.SetBackendServersRequest{
+			setBackendServersRequest := &scwlb.ZonedAPISetBackendServersRequest{
+				Zone:      loadbalancer.Zone,
 				BackendID: backend.ID,
 				ServerIP:  serverIPs,
 			}
@@ -703,7 +717,8 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 		var frontendID string
 		// if the frontend exists for the port, update it
 		if frontend, ok := portFrontends[port.Port]; ok {
-			_, err := l.api.UpdateFrontend(&scwlb.UpdateFrontendRequest{
+			_, err := l.api.UpdateFrontend(&scwlb.ZonedAPIUpdateFrontendRequest{
+				Zone:          loadbalancer.Zone,
 				FrontendID:    frontend.ID,
 				Name:          frontend.Name,
 				InboundPort:   frontend.InboundPort,
@@ -723,7 +738,8 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 			frontendID = frontend.ID
 		} else { // if the frontend for this port does not exist, create it
 			timeoutClient := time.Minute * 10
-			resp, err := l.api.CreateFrontend(&scwlb.CreateFrontendRequest{
+			resp, err := l.api.CreateFrontend(&scwlb.ZonedAPICreateFrontendRequest{
+				Zone:          loadbalancer.Zone,
 				LBID:          loadbalancer.ID,
 				Name:          fmt.Sprintf("%s_tcp_%d", string(service.UID), port.Port),
 				InboundPort:   port.Port,
@@ -745,7 +761,8 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 
 		aclName := frontendID + "-lb-source-range"
 
-		acls, err := l.api.ListACLs(&scwlb.ListACLsRequest{
+		acls, err := l.api.ListACLs(&scwlb.ZonedAPIListACLsRequest{
+			Zone:       loadbalancer.Zone,
 			FrontendID: frontendID,
 			Name:       &aclName,
 		}, scw.WithAllPages())
@@ -755,7 +772,8 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 
 		if len(service.Spec.LoadBalancerSourceRanges) == 0 || len(acls.ACLs) != 1 {
 			for _, acl := range acls.ACLs {
-				err = l.api.DeleteACL(&scwlb.DeleteACLRequest{
+				err = l.api.DeleteACL(&scwlb.ZonedAPIDeleteACLRequest{
+					Zone:  loadbalancer.Zone,
 					ACLID: acl.ID,
 				})
 				if err != nil {
@@ -774,7 +792,8 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 			}
 
 			if len(acls.ACLs) != 1 {
-				_, err := l.api.CreateACL(&scwlb.CreateACLRequest{
+				_, err := l.api.CreateACL(&scwlb.ZonedAPICreateACLRequest{
+					Zone:       loadbalancer.Zone,
 					FrontendID: frontendID,
 					Name:       aclName,
 					Action: &scwlb.ACLAction{
@@ -790,8 +809,9 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 					return err
 				}
 			} else if len(acls.ACLs) == 1 {
-				_, err := l.api.UpdateACL(&scwlb.UpdateACLRequest{
-					ACLID: acls.ACLs[0].ID,
+				_, err := l.api.UpdateACL(&scwlb.ZonedAPIUpdateACLRequest{
+					Zone:   loadbalancer.Zone,
+					ACLID:  acls.ACLs[0].ID,
 					Action: &scwlb.ACLAction{
 						Type: scwlb.ACLActionTypeDeny,
 					},
@@ -813,7 +833,8 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 
 	loadBalancerType := getLoadBalancerType(service)
 	if loadBalancerType != "" && strings.ToLower(loadbalancer.Type) != strings.ToLower(loadBalancerType) {
-		_, err := l.api.MigrateLB(&scwlb.MigrateLBRequest{
+		_, err := l.api.MigrateLB(&scwlb.ZonedAPIMigrateLBRequest{
+			Zone: loadbalancer.Zone,
 			LBID: loadbalancer.ID,
 			Type: loadBalancerType,
 		})
@@ -830,8 +851,8 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 	return nil
 }
 
-func (l *loadbalancers) makeUpdateBackendRequest(backend *scwlb.Backend, service *v1.Service, nodes []*v1.Node) (*scwlb.UpdateBackendRequest, error) {
-	request := &scwlb.UpdateBackendRequest{
+func (l *loadbalancers) makeUpdateBackendRequest(backend *scwlb.Backend, service *v1.Service, nodes []*v1.Node) (*scwlb.ZonedAPIUpdateBackendRequest, error) {
+	request := &scwlb.ZonedAPIUpdateBackendRequest{
 		BackendID:       backend.ID,
 		Name:            backend.Name,
 		ForwardProtocol: scwlb.ProtocolTCP,
@@ -899,8 +920,8 @@ func (l *loadbalancers) makeUpdateBackendRequest(backend *scwlb.Backend, service
 	return request, nil
 }
 
-func (l *loadbalancers) makeUpdateHealthCheckRequest(backend *scwlb.Backend, nodePort int32, service *v1.Service, nodes []*v1.Node) (*scwlb.UpdateHealthCheckRequest, error) {
-	request := &scwlb.UpdateHealthCheckRequest{
+func (l *loadbalancers) makeUpdateHealthCheckRequest(backend *scwlb.Backend, nodePort int32, service *v1.Service, nodes []*v1.Node) (*scwlb.ZonedAPIUpdateHealthCheckRequest, error) {
+	request := &scwlb.ZonedAPIUpdateHealthCheckRequest{
 		BackendID: backend.ID,
 		Port:      nodePort,
 	}
@@ -968,14 +989,15 @@ func (l *loadbalancers) makeUpdateHealthCheckRequest(backend *scwlb.Backend, nod
 	return request, nil
 }
 
-func (l *loadbalancers) makeCreateBackendRequest(loadbalancer *scwlb.LB, nodePort int32, service *v1.Service, nodes []*v1.Node) (*scwlb.CreateBackendRequest, error) {
+func (l *loadbalancers) makeCreateBackendRequest(loadbalancer *scwlb.LB, nodePort int32, service *v1.Service, nodes []*v1.Node) (*scwlb.ZonedAPICreateBackendRequest, error) {
 	var serverIPs []string
 	if getForceInternalIP(service) {
 		serverIPs = extractNodesInternalIps(nodes)
 	} else {
 		serverIPs = extractNodesExternalIps(nodes)
 	}
-	request := &scwlb.CreateBackendRequest{
+	request := &scwlb.ZonedAPICreateBackendRequest{
+		Zone:            loadbalancer.Zone,
 		LBID:            loadbalancer.ID,
 		Name:            fmt.Sprintf("%s_tcp_%d", string(service.UID), nodePort),
 		ServerIP:        serverIPs,
@@ -1111,7 +1133,7 @@ func (l *loadbalancers) makeCreateBackendRequest(loadbalancer *scwlb.LB, nodePor
 	return request, nil
 }
 
-func getLoadBalancerID(service *v1.Service) (scw.Region, string, error) {
+func getLoadBalancerID(service *v1.Service) (scw.Zone, string, error) {
 	annoLoadBalancerID, ok := service.Annotations[serviceAnnotationLoadBalancerID]
 	if !ok {
 		return "", "", errLoadBalancerInvalidAnnotation
@@ -1122,7 +1144,12 @@ func getLoadBalancerID(service *v1.Service) (scw.Region, string, error) {
 		return "", "", errLoadBalancerInvalidLoadBalancerID
 	}
 
-	return scw.Region(splitLoadBalancerID[0]), splitLoadBalancerID[1], nil
+	if validation.IsRegion(splitLoadBalancerID[0]) {
+		zone := splitLoadBalancerID[0] + "-1"
+		return scw.Zone(zone), splitLoadBalancerID[1], nil
+	}
+
+	return scw.Zone(splitLoadBalancerID[0]), splitLoadBalancerID[1], nil
 }
 
 func getForwardPortAlgorithm(service *v1.Service) (scwlb.ForwardPortAlgorithm, error) {
@@ -1232,6 +1259,10 @@ func isPortInRange(r string, p int32) (bool, error) {
 
 func getLoadBalancerType(service *v1.Service) string {
 	return service.Annotations[serviceAnnotationLoadBalancerType]
+}
+
+func getLoadBalancerZone(service *v1.Service) scw.Zone {
+	return scw.Zone(strings.ToLower(service.Annotations[serviceAnnotationLoadBalancerZone]))
 }
 
 func getProxyProtocol(service *v1.Service, nodePort int32) (scwlb.ProxyProtocol, error) {
