@@ -128,5 +128,13 @@ NB: forwarding HTTPS traffic with HTTP protocol enabled will work only if using 
 This is the annotation to choose the the certificate IDs to associate with this LoadBalancer.
 The possible format are:
  - `<certificate-id>`: will use this certificate for all frontends
- - `<certificate-id>,<certificate-id>` will use these certificates for all frontends
- - `<port1>:<certificate1-id>,<certificate2-id>;<port2>,<port3>:<certificate3-id>` will use certificate 1 and 2 for frontend with port port1 and certificate3 for frotend with port port2 and port3
+ - `<certificate-id>,<certificate-id>`: will use these certificates for all frontends
+ - `<port1>:<certificate1-id>,<certificate2-id>;<port2>,<port3>:<certificate3-id>`: will use certificate 1 and 2 for frontend with port port1 and certificate3 for frotend with port port2 and port3
+
+### `service.beta.kubernetes.io/scw-loadbalancer-private-network`
+This is the annotation to choose the private networks to associate with this LoadBalancer.
+The possible format are:
+ - "<private-network-id>": attach load balancer to private network with dchp
+ - "<private-network-id>:<ip1>,<ip2>": attach load balancer to private network with static config and use ip1 and ip2 for static ip address
+ - "<private-network1-id>;<private-network2-id>": attach load balancer to multiple private network with dchp
+ - "<private-network1-id>:<ip1>,<ip2>;<private-network2-id>:<ip1>,<ip2>;<private-network3-id>": mix attachement with DHCP and Static config

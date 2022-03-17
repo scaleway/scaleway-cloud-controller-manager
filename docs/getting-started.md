@@ -118,6 +118,7 @@ stringData:
   SCW_ACCESS_KEY: "xxxxxxxxxxxxxxxx"
   SCW_SECRET_KEY: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
   SCW_DEFAULT_REGION: "fr-par"
+  SCW_DEFAULT_ZONE: "fr-par-1"
   SCW_DEFAULT_PROJECT_ID: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxx"
 ```
 

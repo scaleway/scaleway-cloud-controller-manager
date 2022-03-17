@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -143,14 +144,24 @@ const (
 	// (for instance "80,443")
 	serviceAnnotationLoadBalancerProtocolHTTP = "service.beta.kubernetes.io/scw-loadbalancer-protocol-http"
 
-	// serviceAnnotationLoadBalancerCertificateIDs is the annotation to choose the the certificate IDS to associate
+	// serviceAnnotationLoadBalancerCertificateIDs is the annotation to choose the certificate IDS to associate
 	// with this LoadBalancer.
 	// The possible format are:
 	// "<certificate-id>": will use this certificate for all frontends
-	// "<certificate-id>,<certificate-id>" will use these certificates for all frontends
-	// "<port1>:<certificate1-id>,<certificate2-id>;<port2>,<port3>:<certificate3-id>" will use certificate 1 and 2 for frontend with port port1
+	// "<certificate-id>,<certificate-id>": will use these certificates for all frontends
+	// "<port1>:<certificate1-id>,<certificate2-id>;<port2>,<port3>:<certificate3-id>": will use certificate 1 and 2 for frontend with port port1
 	// and certificate3 for frotend with port port2 and port3
 	serviceAnnotationLoadBalancerCertificateIDs = "service.beta.kubernetes.io/scw-loadbalancer-certificate-ids"
+
+	// serviceAnnotationLoadBalancerPrivateNetworks is the annotation to choose the private networks to associate
+	// with this LoadBalancer.
+	// The possible format are:
+	// "<private-network-id>": attach load balancer to private network with dchp
+	// "<private-network-id>:<ip1>,<ip2>": attach load balancer to private network with static config and use ip1 and ip2 for static ip address
+	// "<private-network1-id>;<private-network2-id>": attach load balancer to multiple private network with dchp
+	// "<private-network1-id>:<ip1>,<ip2>;<private-network2-id>:<ip1>,<ip2>;<private-network3-id>": attach load balancer
+	//
+	serviceAnnotationLoadBalancerPrivateNetworks = "service.beta.kubernetes.io/scw-loadbalancer-private-network"
 )
 
 type loadbalancers struct {
@@ -180,6 +191,9 @@ type LoadBalancerAPI interface {
 	CreateACL(req *scwlb.ZonedAPICreateACLRequest, opts ...scw.RequestOption) (*scwlb.ACL, error)
 	DeleteACL(req *scwlb.ZonedAPIDeleteACLRequest, opts ...scw.RequestOption) error
 	UpdateACL(req *scwlb.ZonedAPIUpdateACLRequest, opts ...scw.RequestOption) (*scwlb.ACL, error)
+	ListLBPrivateNetworks(req *scwlb.ZonedAPIListLBPrivateNetworksRequest, opts ...scw.RequestOption) (*scwlb.ListLBPrivateNetworksResponse, error)
+	AttachPrivateNetwork(req *scwlb.ZonedAPIAttachPrivateNetworkRequest, opts ...scw.RequestOption) (*scwlb.PrivateNetwork, error)
+	DetachPrivateNetwork(req *scwlb.ZonedAPIDetachPrivateNetworkRequest, opts ...scw.RequestOption) error
 }
 
 func newLoadbalancers(client *client, defaultLBType string) *loadbalancers {
@@ -816,6 +830,11 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 		}
 	}
 
+	if err = l.managePrivateNetwork(loadbalancer, service); err != nil {
+		klog.Errorf("error managing private Network %s: %v", service.Name, err)
+		return err
+	}
+
 	loadBalancerType := getLoadBalancerType(service)
 	if loadBalancerType != "" && strings.ToLower(loadbalancer.Type) != loadBalancerType {
 		_, err := l.api.MigrateLB(&scwlb.ZonedAPIMigrateLBRequest{
@@ -1149,6 +1168,73 @@ func (l *loadbalancers) makeCreateBackendRequest(loadbalancer *scwlb.LB, nodePor
 	request.HealthCheck = healthCheck
 
 	return request, nil
+}
+
+func (l *loadbalancers) managePrivateNetwork(loadbalancer *scwlb.LB, service *v1.Service) error {
+
+	desiredPrivateNetworks := parsePrivateNetworkAnnotations(service)
+	attachedPrivateNetworks, err := l.api.ListLBPrivateNetworks(
+		&scwlb.ZonedAPIListLBPrivateNetworksRequest{
+			Zone: loadbalancer.Zone,
+			LBID: loadbalancer.ID,
+		}, scw.WithAllPages())
+
+	if err != nil {
+		return err
+	}
+
+	// Detach management
+	detachPrivateNetwork := false
+	for _, attachedPrivatesNetwork := range attachedPrivateNetworks.PrivateNetwork {
+		if !privateNetworkAnnotationsIsPresentAndUpToDate(desiredPrivateNetworks, *attachedPrivatesNetwork) {
+			err = l.api.DetachPrivateNetwork(&scwlb.ZonedAPIDetachPrivateNetworkRequest{
+				Zone:             loadbalancer.Zone,
+				LBID:             loadbalancer.ID,
+				PrivateNetworkID: attachedPrivatesNetwork.PrivateNetworkID,
+			})
+
+			if err != nil {
+				return err
+			}
+			detachPrivateNetwork = true
+		}
+	}
+
+	// Refresh after detach
+	if detachPrivateNetwork {
+		// wait detach is done
+		// TODO: find better solution
+		time.Sleep(2 * time.Second)
+		attachedPrivateNetworks, err = l.api.ListLBPrivateNetworks(
+			&scwlb.ZonedAPIListLBPrivateNetworksRequest{
+				Zone: loadbalancer.Zone,
+				LBID: loadbalancer.ID,
+			}, scw.WithAllPages())
+
+		if err != nil {
+			return err
+		}
+
+	}
+
+	// Attach management
+	for _, desiredPrivateNetwork := range desiredPrivateNetworks {
+		if !desiredPrivateNetwork.privateNetworkExist(attachedPrivateNetworks.PrivateNetwork) {
+			_, err = l.api.AttachPrivateNetwork(&scwlb.ZonedAPIAttachPrivateNetworkRequest{
+				Zone:             loadbalancer.Zone,
+				LBID:             loadbalancer.ID,
+				PrivateNetworkID: desiredPrivateNetwork.privateNetworkID,
+				StaticConfig:     desiredPrivateNetwork.StaticConfig,
+				DHCPConfig:       desiredPrivateNetwork.DHCPConfig,
+			})
+
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
 }
 
 func getLoadBalancerID(service *v1.Service) (scw.Zone, string, error) {
@@ -1705,4 +1791,69 @@ func getHTTPSHealthCheck(service *v1.Service, nodePort int32) (*scwlb.HealthChec
 		Code:   &code,
 		URI:    uri,
 	}, nil
+}
+
+func parsePrivateNetworkAnnotations(service *v1.Service) []privateNetworkAnnotations {
+	rawPrivatesNetworksAnnotations := service.Annotations[serviceAnnotationLoadBalancerPrivateNetworks]
+	var privateNetworksAnnotations []privateNetworkAnnotations
+
+	if len(rawPrivatesNetworksAnnotations) == 0 {
+		return privateNetworksAnnotations
+	}
+
+	for _, privateNetwork := range strings.Split(rawPrivatesNetworksAnnotations, ";") {
+
+		split := strings.Split(privateNetwork, ":")
+
+		if len(split) == 1 {
+			// DCHP
+			privateNetworksAnnotations = append(privateNetworksAnnotations, privateNetworkAnnotations{
+				privateNetworkID: split[0],
+				DHCPConfig:       &scwlb.PrivateNetworkDHCPConfig{},
+			})
+		} else {
+			// static ip addresse
+			ipAdresses := strings.Split(split[1], ",")
+			privateNetworksAnnotations = append(privateNetworksAnnotations, privateNetworkAnnotations{
+				privateNetworkID: split[0],
+				StaticConfig: &scwlb.PrivateNetworkStaticConfig{
+					IPAddress: ipAdresses,
+				},
+			})
+		}
+		return privateNetworksAnnotations
+
+	}
+	return privateNetworksAnnotations
+}
+
+type privateNetworkAnnotations struct {
+	privateNetworkID string
+	DHCPConfig       *scwlb.PrivateNetworkDHCPConfig
+	StaticConfig     *scwlb.PrivateNetworkStaticConfig
+}
+
+func (privateNetworkAnnotations privateNetworkAnnotations) privateNetworkExist(privateNetworks []*scwlb.PrivateNetwork) bool {
+	for _, privateNetwork := range privateNetworks {
+		if privateNetwork.PrivateNetworkID == privateNetworkAnnotations.privateNetworkID {
+			return true
+		}
+	}
+	return false
+}
+
+func privateNetworkAnnotationsIsPresentAndUpToDate(privateNetworksAnnotations []privateNetworkAnnotations, privateNetwork scwlb.PrivateNetwork) bool {
+	for _, privateNetworkAnnotations := range privateNetworksAnnotations {
+		// Check if
+		//   * id match
+		//   * DHCPConfig are equal (nil == nil or emptyObj == emptyOBJ)
+		//   * StaticConfig are equal (nil == nil or IPAddress == IPAddress)
+		if privateNetworkAnnotations.privateNetworkID == privateNetwork.PrivateNetworkID &&
+			privateNetworkAnnotations.DHCPConfig == privateNetwork.DHCPConfig &&
+			(privateNetworkAnnotations.StaticConfig == privateNetwork.StaticConfig ||
+				reflect.DeepEqual(privateNetworkAnnotations.StaticConfig.IPAddress, privateNetwork.StaticConfig.IPAddress)) {
+			return true
+		}
+	}
+	return false
 }
