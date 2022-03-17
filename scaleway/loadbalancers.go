@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -1842,6 +1843,19 @@ func (privateNetworkAnnotations privateNetworkAnnotations) privateNetworkExist(p
 	return false
 }
 
+func (privateNetworkAnnotations privateNetworkAnnotations) compareIPAddress(privateNetwork []string) bool {
+	var privateNetworkAnnotationsIPAddress []string
+	var privateNetworkIPAddress []string
+
+	copy(privateNetworkAnnotationsIPAddress, privateNetworkAnnotations.StaticConfig.IPAddress)
+	copy(privateNetworkIPAddress, privateNetwork)
+
+	sort.Strings(privateNetworkAnnotationsIPAddress)
+	sort.Strings(privateNetworkIPAddress)
+
+	return reflect.DeepEqual(privateNetworkAnnotationsIPAddress, privateNetworkIPAddress)
+}
+
 func privateNetworkAnnotationsIsPresentAndUpToDate(privateNetworksAnnotations []privateNetworkAnnotations, privateNetwork scwlb.PrivateNetwork) bool {
 	for _, privateNetworkAnnotations := range privateNetworksAnnotations {
 		// Check if
@@ -1851,7 +1865,7 @@ func privateNetworkAnnotationsIsPresentAndUpToDate(privateNetworksAnnotations []
 		if privateNetworkAnnotations.privateNetworkID == privateNetwork.PrivateNetworkID &&
 			privateNetworkAnnotations.DHCPConfig == privateNetwork.DHCPConfig &&
 			(privateNetworkAnnotations.StaticConfig == privateNetwork.StaticConfig ||
-				reflect.DeepEqual(privateNetworkAnnotations.StaticConfig.IPAddress, privateNetwork.StaticConfig.IPAddress)) {
+				privateNetworkAnnotations.compareIPAddress(privateNetwork.StaticConfig.IPAddress)) {
 			return true
 		}
 	}
