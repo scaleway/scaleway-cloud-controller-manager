@@ -131,7 +131,7 @@ The possible format are:
  - `<certificate-id>,<certificate-id>`: will use these certificates for all frontends
  - `<port1>:<certificate1-id>,<certificate2-id>;<port2>,<port3>:<certificate3-id>`: will use certificate 1 and 2 for frontend with port port1 and certificate3 for frotend with port port2 and port3
 
-### `service.beta.kubernetes.io/scw-loadbalancer-private-network`
+### `service.beta.kubernetes.io/scw-loadbalancer-private-networks`
 This is the annotation to choose the private networks to associate with this LoadBalancer.
 The possible format are:
  - "<private-network-id>": attach load balancer to private network with dchp

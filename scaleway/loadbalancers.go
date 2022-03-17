@@ -161,7 +161,7 @@ const (
 	// "<private-network1-id>;<private-network2-id>": attach load balancer to multiple private network with dchp
 	// "<private-network1-id>:<ip1>,<ip2>;<private-network2-id>:<ip1>,<ip2>;<private-network3-id>": attach load balancer
 	//
-	serviceAnnotationLoadBalancerPrivateNetworks = "service.beta.kubernetes.io/scw-loadbalancer-private-network"
+	serviceAnnotationLoadBalancerPrivateNetworks = "service.beta.kubernetes.io/scw-loadbalancer-private-networks"
 )
 
 type loadbalancers struct {
@@ -831,7 +831,7 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 	}
 
 	if err = l.managePrivateNetwork(loadbalancer, service); err != nil {
-		klog.Errorf("error managing private Network %s: %v", service.Name, err)
+		klog.Errorf("error managing private networks on load balancer %s and service %s: %v", loadbalancer.ID, service.Name, err)
 		return err
 	}
 
