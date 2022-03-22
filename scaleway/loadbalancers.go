@@ -1185,7 +1185,7 @@ func (l *loadbalancers) managePrivateNetwork(loadbalancer *scwlb.LB, service *v1
 	}
 
 	// Detach management
-	detachPrivateNetwork := false
+	var attachedPrivateNetworksToKeep []*scwlb.PrivateNetwork
 	for _, attachedPrivatesNetwork := range attachedPrivateNetworks.PrivateNetwork {
 		if !privateNetworkAnnotationsIsPresentAndUpToDate(desiredPrivateNetworks, *attachedPrivatesNetwork) {
 			err = l.api.DetachPrivateNetwork(&scwlb.ZonedAPIDetachPrivateNetworkRequest{
@@ -1197,30 +1197,14 @@ func (l *loadbalancers) managePrivateNetwork(loadbalancer *scwlb.LB, service *v1
 			if err != nil {
 				return err
 			}
-			detachPrivateNetwork = true
+		} else {
+			attachedPrivateNetworksToKeep = append(attachedPrivateNetworksToKeep, attachedPrivatesNetwork)
 		}
-	}
-
-	// Refresh after detach
-	if detachPrivateNetwork {
-		// wait detach is done
-		// TODO: find better solution
-		time.Sleep(2 * time.Second)
-		attachedPrivateNetworks, err = l.api.ListLBPrivateNetworks(
-			&scwlb.ZonedAPIListLBPrivateNetworksRequest{
-				Zone: loadbalancer.Zone,
-				LBID: loadbalancer.ID,
-			}, scw.WithAllPages())
-
-		if err != nil {
-			return err
-		}
-
 	}
 
 	// Attach management
 	for _, desiredPrivateNetwork := range desiredPrivateNetworks {
-		if !desiredPrivateNetwork.privateNetworkExist(attachedPrivateNetworks.PrivateNetwork) {
+		if !desiredPrivateNetwork.privateNetworkExist(attachedPrivateNetworksToKeep) {
 			_, err = l.api.AttachPrivateNetwork(&scwlb.ZonedAPIAttachPrivateNetworkRequest{
 				Zone:             loadbalancer.Zone,
 				LBID:             loadbalancer.ID,
