@@ -170,11 +170,12 @@ func TestInstances_NodeAddresses(t *testing.T) {
 		Equals(t, expectedAddresses, returnedAddresses)
 	})
 
-	t.Run("WithoutPublic", func(t *testing.T) {
+	t.Run("WithoutPublicIP4", func(t *testing.T) {
 		expectedAddresses := []v1.NodeAddress{
 			{Type: v1.NodeHostName, Address: "scw-charming-feistel"},
 			{Type: v1.NodeInternalIP, Address: "10.14.0.1"},
 			{Type: v1.NodeInternalDNS, Address: "a7ab9055-5fe2-4009-afd0-7787399e6755.priv.instances.scw.cloud"},
+			{Type: v1.NodeExternalDNS, Address: "a7ab9055-5fe2-4009-afd0-7787399e6755.pub.instances.scw.cloud"},
 		}
 
 		returnedAddresses, err := instance.NodeAddresses(context.TODO(), "scw-charming-feistel")
@@ -200,11 +201,12 @@ func TestInstances_NodeAddressesByProviderID(t *testing.T) {
 		Equals(t, returnedAddresses, expectedAddresses)
 	})
 
-	t.Run("WithoutPublic", func(t *testing.T) {
+	t.Run("WithoutPublicIP4", func(t *testing.T) {
 		expected := []v1.NodeAddress{
 			{Type: v1.NodeHostName, Address: "scw-charming-feistel"},
 			{Type: v1.NodeInternalIP, Address: "10.14.0.1"},
 			{Type: v1.NodeInternalDNS, Address: "a7ab9055-5fe2-4009-afd0-7787399e6755.priv.instances.scw.cloud"},
+			{Type: v1.NodeExternalDNS, Address: "a7ab9055-5fe2-4009-afd0-7787399e6755.pub.instances.scw.cloud"},
 		}
 
 		result, err := instance.NodeAddressesByProviderID(context.TODO(), "scaleway://instance/fr-par-1/a7ab9055-5fe2-4009-afd0-7787399e6755")

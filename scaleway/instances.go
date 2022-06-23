@@ -19,17 +19,24 @@ package scaleway
 import (
 	"context"
 	"fmt"
+	"os"
 
 	scwinstance "github.com/scaleway/scaleway-sdk-go/api/instance/v1"
+	vpcgw "github.com/scaleway/scaleway-sdk-go/api/vpcgw/v1"
 	"github.com/scaleway/scaleway-sdk-go/scw"
 	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	cloudprovider "k8s.io/cloud-provider"
+	cloudproviderapi "k8s.io/cloud-provider/api"
 	"k8s.io/klog/v2"
 )
 
 type instances struct {
-	api InstanceAPI
+	api              InstanceAPI
+	vpcgw            vpcGatewayAPI
+	client           *client
+	privateNetworkID *string
 }
 
 type InstanceAPI interface {
@@ -37,9 +44,23 @@ type InstanceAPI interface {
 	GetServer(req *scwinstance.GetServerRequest, opts ...scw.RequestOption) (*scwinstance.GetServerResponse, error)
 }
 
+type vpcGatewayAPI interface {
+	ListDHCPEntries(req *vpcgw.ListDHCPEntriesRequest, opts ...scw.RequestOption) (*vpcgw.ListDHCPEntriesResponse, error)
+}
+
 func newInstances(client *client) *instances {
+	var privateNetworkID *string
+
+	vpc := os.Getenv("SCW_VPC_ID")
+	if vpc != "" {
+		privateNetworkID = &vpc
+	}
+
 	return &instances{
-		api: scwinstance.NewAPI(client.scaleway),
+		api:              scwinstance.NewAPI(client.scaleway),
+		vpcgw:            vpcgw.NewAPI(client.scaleway),
+		client:           client,
+		privateNetworkID: privateNetworkID,
 	}
 }
 
@@ -49,7 +70,7 @@ func (i *instances) NodeAddresses(ctx context.Context, name types.NodeName) ([]v
 	if err != nil {
 		return nil, err
 	}
-	return instanceAddresses(server), nil
+	return i.instanceAddresses(server), nil
 }
 
 // NodeAddressesByProviderID returns the addresses of the specified instance.
@@ -59,7 +80,7 @@ func (i *instances) NodeAddressesByProviderID(ctx context.Context, providerID st
 	if err != nil {
 		return nil, err
 	}
-	return instanceAddresses(instanceServer), nil
+	return i.instanceAddresses(instanceServer), nil
 }
 
 // InstanceID returns the cloud provider ID of the node with the specified NodeName.
@@ -152,23 +173,75 @@ func (i *instances) GetZoneByNodeName(ctx context.Context, nodeName types.NodeNa
 // ===========================
 
 // instanceAddresses extracts NodeAdress from the server
-func instanceAddresses(server *scwinstance.Server) []v1.NodeAddress {
+func (i *instances) instanceAddresses(server *scwinstance.Server) []v1.NodeAddress {
 	addresses := []v1.NodeAddress{
 		{Type: v1.NodeHostName, Address: server.Hostname},
 	}
 
 	if server.PrivateIP != nil && *server.PrivateIP != "" {
-		addresses = append(
-			addresses,
-			v1.NodeAddress{Type: v1.NodeInternalIP, Address: *server.PrivateIP},
-			v1.NodeAddress{Type: v1.NodeInternalDNS, Address: fmt.Sprintf("%s.priv.instances.scw.cloud", server.ID)},
-		)
+		if server.PrivateNics != nil && i.privateNetworkID != nil {
+			for _, nic := range server.PrivateNics {
+				if nic.State != scwinstance.PrivateNICStateAvailable {
+					continue
+				}
+
+				entries, err := i.vpcgw.ListDHCPEntries(&vpcgw.ListDHCPEntriesRequest{
+					Zone:       server.Zone,
+					MacAddress: &nic.MacAddress,
+				}, scw.WithAllPages())
+
+				if err != nil {
+					if is404Error(err) {
+						continue
+					}
+
+					klog.Errorf("error getting list dhcp entries for instance %s: %v", server.ID, err)
+					return nil
+				}
+
+				if len(entries.DHCPEntries) > 0 {
+					for _, record := range entries.DHCPEntries {
+						if record.Type != vpcgw.DHCPEntryTypeUnknown {
+							addresses = append(
+								addresses,
+								v1.NodeAddress{Type: v1.NodeInternalIP, Address: record.IPAddress.String()},
+							)
+						}
+					}
+				} else {
+					klog.Errorf("return empty dhcp entries list for instance %s, use kubelet annotation ipaddr", server.ID)
+
+					if i.client.kubernetes != nil {
+						if node, _ := i.client.kubernetes.CoreV1().Nodes().Get(context.TODO(), server.Hostname, metav1.GetOptions{}); node != nil {
+							providedIP, ok := node.ObjectMeta.Annotations[cloudproviderapi.AnnotationAlphaProvidedIPAddr]
+							if ok {
+								addresses = append(
+									addresses,
+									v1.NodeAddress{Type: v1.NodeInternalIP, Address: providedIP},
+								)
+							}
+						}
+					}
+				}
+			}
+		} else {
+			addresses = append(
+				addresses,
+				v1.NodeAddress{Type: v1.NodeInternalIP, Address: *server.PrivateIP},
+				v1.NodeAddress{Type: v1.NodeInternalDNS, Address: fmt.Sprintf("%s.priv.instances.scw.cloud", server.ID)},
+			)
+		}
 	}
 
 	if server.PublicIP != nil {
 		addresses = append(
 			addresses,
 			v1.NodeAddress{Type: v1.NodeExternalIP, Address: server.PublicIP.Address.String()},
+			v1.NodeAddress{Type: v1.NodeExternalDNS, Address: fmt.Sprintf("%s.pub.instances.scw.cloud", server.ID)},
+		)
+	} else if server.EnableIPv6 {
+		addresses = append(
+			addresses,
 			v1.NodeAddress{Type: v1.NodeExternalDNS, Address: fmt.Sprintf("%s.pub.instances.scw.cloud", server.ID)},
 		)
 	}
@@ -322,7 +395,7 @@ func (i *instances) InstanceMetadata(ctx context.Context, node *v1.Node) (*cloud
 	return &cloudprovider.InstanceMetadata{
 		ProviderID:    BuildProviderID(InstanceTypeInstance, instance.Zone.String(), instance.ID),
 		InstanceType:  instance.CommercialType,
-		NodeAddresses: instanceAddresses(instance),
+		NodeAddresses: i.instanceAddresses(instance),
 		Region:        region.String(),
 		Zone:          instance.Zone.String(),
 	}, nil
