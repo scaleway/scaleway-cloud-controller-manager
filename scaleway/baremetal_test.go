@@ -22,7 +22,7 @@ import (
 	"strings"
 	"testing"
 
-	scwbaremetal "github.com/scaleway/scaleway-sdk-go/api/baremetal/v1alpha1"
+	scwbaremetal "github.com/scaleway/scaleway-sdk-go/api/baremetal/v1"
 	"github.com/scaleway/scaleway-sdk-go/scw"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
