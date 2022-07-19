@@ -19,7 +19,7 @@ package scaleway
 import (
 	"context"
 
-	scwbaremetal "github.com/scaleway/scaleway-sdk-go/api/baremetal/v1alpha1"
+	scwbaremetal "github.com/scaleway/scaleway-sdk-go/api/baremetal/v1"
 	"github.com/scaleway/scaleway-sdk-go/scw"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
