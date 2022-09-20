@@ -18,7 +18,7 @@ spec:
 
 ## Load balancer properties
 
-You can get a list of working annotation on in the Scaleway loadBalancer [documentation](https://developers.scaleway.com/en/products/lb/api/#post-db0bfe) annotations are:
+You can get a list of working annotation on in the Scaleway loadBalancer [documentation](https://developers.scaleway.com/en/products/lb/zoned_api/) annotations are:
 
 Note:
 - If an invalid mode is passed in the annotation, the service will throw an error.
