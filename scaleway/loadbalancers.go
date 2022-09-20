@@ -115,6 +115,10 @@ const (
 	// serviceAnnotationLoadBalancerZone is the zone to create the load balancer
 	serviceAnnotationLoadBalancerZone = "service.beta.kubernetes.io/scw-loadbalancer-zone"
 
+	// serviceAnnotationLoadBalancerTimeoutClient is the maximum client connection inactivity time
+	// The default value is "10m". The duration are go's time.Duration (ex: "1s", "2m", "4h", ...)
+	serviceAnnotationLoadBalancerTimeoutClient = "service.beta.kubernetes.io/scw-loadbalancer-timeout-client"
+
 	// serviceAnnotationLoadBalancerTimeoutServer is the maximum server connection inactivity time
 	// The default value is "10m". The duration are go's time.Duration (ex: "1s", "2m", "4h", ...)
 	serviceAnnotationLoadBalancerTimeoutServer = "service.beta.kubernetes.io/scw-loadbalancer-timeout-server"
@@ -710,6 +714,13 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 		if err != nil {
 			return fmt.Errorf("error getting certificate IDs for loadbalancer %s: %v", loadbalancer.ID, err)
 		}
+
+		timeoutClient, err := getTimeoutClient(service)
+		if err != nil {
+			return fmt.Errorf("error getting %s annotation for loadbalancer %s: %v",
+				serviceAnnotationLoadBalancerTimeoutClient, loadbalancer.ID, err)
+		}
+
 		// if the frontend exists for the port, update it
 		if frontend, ok := portFrontends[port.Port]; ok {
 			_, err := l.api.UpdateFrontend(&scwlb.ZonedAPIUpdateFrontendRequest{
@@ -718,7 +729,7 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 				Name:           frontend.Name,
 				InboundPort:    frontend.InboundPort,
 				BackendID:      portBackends[port.NodePort].ID,
-				TimeoutClient:  frontend.TimeoutClient,
+				TimeoutClient:  &timeoutClient,
 				CertificateIDs: scw.StringsPtr(certificateIDs),
 			})
 
@@ -729,14 +740,13 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 
 			frontendID = frontend.ID
 		} else { // if the frontend for this port does not exist, create it
-			timeoutClient := time.Minute * 10
 			resp, err := l.api.CreateFrontend(&scwlb.ZonedAPICreateFrontendRequest{
 				Zone:           loadbalancer.Zone,
 				LBID:           loadbalancer.ID,
 				Name:           fmt.Sprintf("%s_tcp_%d", string(service.UID), port.Port),
 				InboundPort:    port.Port,
 				BackendID:      portBackends[port.NodePort].ID,
-				TimeoutClient:  &timeoutClient, // TODO use annotation?
+				TimeoutClient:  &timeoutClient,
 				CertificateIDs: scw.StringsPtr(certificateIDs),
 			})
 
@@ -1328,6 +1338,21 @@ func getProxyProtocol(service *v1.Service, nodePort int32) (scwlb.ProxyProtocol,
 	}
 
 	return getSendProxyV2(service, nodePort)
+}
+
+func getTimeoutClient(service *v1.Service) (time.Duration, error) {
+	timeoutClient, ok := service.Annotations[serviceAnnotationLoadBalancerTimeoutClient]
+	if !ok {
+		return time.ParseDuration("10m")
+	}
+
+	timeoutClientDuration, err := time.ParseDuration(timeoutClient)
+	if err != nil {
+		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerTimeoutClient)
+		return time.Duration(0), errLoadBalancerInvalidAnnotation
+	}
+
+	return timeoutClientDuration, nil
 }
 
 func getTimeoutServer(service *v1.Service) (time.Duration, error) {
