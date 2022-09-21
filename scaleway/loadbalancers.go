@@ -115,6 +115,10 @@ const (
 	// serviceAnnotationLoadBalancerZone is the zone to create the load balancer
 	serviceAnnotationLoadBalancerZone = "service.beta.kubernetes.io/scw-loadbalancer-zone"
 
+	// serviceAnnotationLoadBalancerTimeoutClient is the maximum client connection inactivity time
+	// The default value is "10m". The duration are go's time.Duration (ex: "1s", "2m", "4h", ...)
+	serviceAnnotationLoadBalancerTimeoutClient = "service.beta.kubernetes.io/scw-loadbalancer-timeout-client"
+
 	// serviceAnnotationLoadBalancerTimeoutServer is the maximum server connection inactivity time
 	// The default value is "10m". The duration are go's time.Duration (ex: "1s", "2m", "4h", ...)
 	serviceAnnotationLoadBalancerTimeoutServer = "service.beta.kubernetes.io/scw-loadbalancer-timeout-server"
@@ -144,7 +148,7 @@ const (
 	// (for instance "80,443")
 	serviceAnnotationLoadBalancerProtocolHTTP = "service.beta.kubernetes.io/scw-loadbalancer-protocol-http"
 
-	// serviceAnnotationLoadBalancerCertificateIDs is the annotation to choose the the certificate IDS to associate
+	// serviceAnnotationLoadBalancerCertificateIDs is the annotation to choose the certificate IDS to associate
 	// with this LoadBalancer.
 	// The possible format are:
 	// "<certificate-id>": will use this certificate for all frontends
@@ -152,6 +156,10 @@ const (
 	// "<port1>:<certificate1-id>,<certificate2-id>;<port2>,<port3>:<certificate3-id>" will use certificate 1 and 2 for frontend with port port1
 	// and certificate3 for frotend with port port2 and port3
 	serviceAnnotationLoadBalancerCertificateIDs = "service.beta.kubernetes.io/scw-loadbalancer-certificate-ids"
+
+	// serviceAnnotationLoadBalancerTargetNodeLabels is the annotation to target nodes with specific label(s)
+	// Expected format: "Key1=Val1,Key2=Val2"
+	serviceAnnotationLoadBalancerTargetNodeLabels = "service.beta.kubernetes.io/scw-loadbalancer-target-node-labels"
 )
 
 const MaxEntriesPerACL = 60
@@ -272,6 +280,8 @@ func (l *loadbalancers) EnsureLoadBalancer(ctx context.Context, clusterName stri
 		return nil, LoadBalancerNotReady
 	}
 
+	nodes = filterNodes(service, nodes)
+
 	err = l.updateLoadBalancer(ctx, lb, service, nodes)
 	if err != nil {
 		klog.Errorf("error updating loadbalancer for service %s: %v", service.Name, err)
@@ -338,7 +348,6 @@ func (l *loadbalancers) EnsureLoadBalancerDeleted(ctx context.Context, clusterNa
 	return l.deleteLoadBalancer(ctx, lb, service)
 }
 
-//
 func (l *loadbalancers) deleteLoadBalancer(ctx context.Context, lb *scwlb.LB, service *v1.Service) error {
 	// remove loadbalancer annotation
 	if err := l.unannotateAndPatch(service); err != nil {
@@ -710,6 +719,13 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 		if err != nil {
 			return fmt.Errorf("error getting certificate IDs for loadbalancer %s: %v", loadbalancer.ID, err)
 		}
+
+		timeoutClient, err := getTimeoutClient(service)
+		if err != nil {
+			return fmt.Errorf("error getting %s annotation for loadbalancer %s: %v",
+				serviceAnnotationLoadBalancerTimeoutClient, loadbalancer.ID, err)
+		}
+
 		// if the frontend exists for the port, update it
 		if frontend, ok := portFrontends[port.Port]; ok {
 			_, err := l.api.UpdateFrontend(&scwlb.ZonedAPIUpdateFrontendRequest{
@@ -718,7 +734,7 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 				Name:           frontend.Name,
 				InboundPort:    frontend.InboundPort,
 				BackendID:      portBackends[port.NodePort].ID,
-				TimeoutClient:  frontend.TimeoutClient,
+				TimeoutClient:  &timeoutClient,
 				CertificateIDs: scw.StringsPtr(certificateIDs),
 			})
 
@@ -729,14 +745,13 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 
 			frontendID = frontend.ID
 		} else { // if the frontend for this port does not exist, create it
-			timeoutClient := time.Minute * 10
 			resp, err := l.api.CreateFrontend(&scwlb.ZonedAPICreateFrontendRequest{
 				Zone:           loadbalancer.Zone,
 				LBID:           loadbalancer.ID,
 				Name:           fmt.Sprintf("%s_tcp_%d", string(service.UID), port.Port),
 				InboundPort:    port.Port,
 				BackendID:      portBackends[port.NodePort].ID,
-				TimeoutClient:  &timeoutClient, // TODO use annotation?
+				TimeoutClient:  &timeoutClient,
 				CertificateIDs: scw.StringsPtr(certificateIDs),
 			})
 
@@ -1330,6 +1345,21 @@ func getProxyProtocol(service *v1.Service, nodePort int32) (scwlb.ProxyProtocol,
 	return getSendProxyV2(service, nodePort)
 }
 
+func getTimeoutClient(service *v1.Service) (time.Duration, error) {
+	timeoutClient, ok := service.Annotations[serviceAnnotationLoadBalancerTimeoutClient]
+	if !ok {
+		return time.ParseDuration("10m")
+	}
+
+	timeoutClientDuration, err := time.ParseDuration(timeoutClient)
+	if err != nil {
+		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerTimeoutClient)
+		return time.Duration(0), errLoadBalancerInvalidAnnotation
+	}
+
+	return timeoutClientDuration, nil
+}
+
 func getTimeoutServer(service *v1.Service) (time.Duration, error) {
 	timeoutServer, ok := service.Annotations[serviceAnnotationLoadBalancerTimeoutServer]
 	if !ok {
@@ -1711,4 +1741,64 @@ func getHTTPSHealthCheck(service *v1.Service, nodePort int32) (*scwlb.HealthChec
 		Code:   &code,
 		URI:    uri,
 	}, nil
+}
+
+// Original version: https://github.com/kubernetes/legacy-cloud-providers/blob/1aa918bf227e52af6f8feb3fa065dabff251a0a3/aws/aws_loadbalancer.go#L117
+func getKeyValueFromAnnotation(annotation string) map[string]string {
+	additionalTags := make(map[string]string)
+	additionalTagsList := strings.TrimSpace(annotation)
+
+	// Break up list of "Key1=Val,Key2=Val2"
+	tagList := strings.Split(additionalTagsList, ",")
+
+	// Break up "Key=Val"
+	for _, tagSet := range tagList {
+		tag := strings.Split(strings.TrimSpace(tagSet), "=")
+
+		// Accept "Key=val" or "Key=" or just "Key"
+		if len(tag) >= 2 && len(tag[0]) != 0 {
+			// There is a key and a value, so save it
+			additionalTags[tag[0]] = tag[1]
+		} else if len(tag) == 1 && len(tag[0]) != 0 {
+			// Just "Key"
+			additionalTags[tag[0]] = ""
+		}
+	}
+
+	return additionalTags
+}
+
+// Original version: https://github.com/kubernetes/legacy-cloud-providers/blob/1aa918bf227e52af6f8feb3fa065dabff251a0a3/aws/aws_loadbalancer.go#L1631
+func filterNodes(service *v1.Service, nodes []*v1.Node) []*v1.Node {
+	nodeLabels, ok := service.Annotations[serviceAnnotationLoadBalancerTargetNodeLabels]
+	if !ok {
+		return nodes
+	}
+
+	targetNodeLabels := getKeyValueFromAnnotation(nodeLabels)
+
+	if len(targetNodeLabels) == 0 {
+		return nodes
+	}
+
+	targetNodes := make([]*v1.Node, 0, len(nodes))
+
+	for _, node := range nodes {
+		if node.Labels != nil && len(node.Labels) > 0 {
+			allFiltersMatch := true
+
+			for targetLabelKey, targetLabelValue := range targetNodeLabels {
+				if nodeLabelValue, ok := node.Labels[targetLabelKey]; !ok || (nodeLabelValue != targetLabelValue && targetLabelValue != "") {
+					allFiltersMatch = false
+					break
+				}
+			}
+
+			if allFiltersMatch {
+				targetNodes = append(targetNodes, node)
+			}
+		}
+	}
+
+	return targetNodes
 }

@@ -18,7 +18,7 @@ spec:
 
 ## Load balancer properties
 
-You can get a list of working annotation on in the Scaleway loadBalancer [documentation](https://developers.scaleway.com/en/products/lb/api/#post-db0bfe) annotations are:
+You can get a list of working annotation on in the Scaleway loadBalancer [documentation](https://developers.scaleway.com/en/products/lb/zoned_api/) annotations are:
 
 Note:
 - If an invalid mode is passed in the annotation, the service will throw an error.
@@ -94,6 +94,10 @@ The possible values are `false`, `true` or `*` for all ports or a comma delimite
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-type`
 This is the annotation to set the load balancer offer type.
+
+### `service.beta.kubernetes.io/scw-loadbalancer-timeout-client`
+This is the annotation to set the maximum client connection inactivity time.
+The default value is `10m`. The duration are go's time.Duration (ex: `1s`, `2m`, `4h`, ...).
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-timeout-server`
 This is the annotation to set the maximum server connection inactivity time.
