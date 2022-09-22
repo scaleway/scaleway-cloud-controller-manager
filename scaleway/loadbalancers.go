@@ -765,7 +765,7 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 			return fmt.Errorf("error getting certificate IDs for loadbalancer %s: %v", loadbalancer.ID, err)
 		}
 
-		timeoutClient, err := getTimeoutClient(service)
+		timeoutClient, err := getOptTimeoutClient(service)
 		if err != nil {
 			return fmt.Errorf("error getting %s annotation for loadbalancer %s: %v",
 				serviceAnnotationLoadBalancerTimeoutClient, loadbalancer.ID, err)
@@ -779,7 +779,7 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 				Name:           frontend.Name,
 				InboundPort:    frontend.InboundPort,
 				BackendID:      portBackends[port.NodePort].ID,
-				TimeoutClient:  &timeoutClient,
+				TimeoutClient:  timeoutClient,
 				CertificateIDs: scw.StringsPtr(certificateIDs),
 			})
 
@@ -796,7 +796,7 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 				Name:           fmt.Sprintf("%s_tcp_%d", string(service.UID), port.Port),
 				InboundPort:    port.Port,
 				BackendID:      portBackends[port.NodePort].ID,
-				TimeoutClient:  &timeoutClient,
+				TimeoutClient:  timeoutClient,
 				CertificateIDs: scw.StringsPtr(certificateIDs),
 			})
 
@@ -941,26 +941,26 @@ func (l *loadbalancers) makeUpdateBackendRequest(backend *scwlb.Backend, service
 	}
 	request.ProxyProtocol = proxyProtocol
 
-	timeoutServer, err := getTimeoutServer(service)
+	timeoutServer, err := getOptTimeoutServer(service)
 	if err != nil {
 		return nil, err
 	}
 
-	request.TimeoutServer = &timeoutServer
+	request.TimeoutServer = timeoutServer
 
-	timeoutConnect, err := getTimeoutConnect(service)
+	timeoutConnect, err := getOptTimeoutConnect(service)
 	if err != nil {
 		return nil, err
 	}
 
-	request.TimeoutConnect = &timeoutConnect
+	request.TimeoutConnect = timeoutConnect
 
-	timeoutTunnel, err := getTimeoutTunnel(service)
+	timeoutTunnel, err := getOptTimeoutTunnel(service)
 	if err != nil {
 		return nil, err
 	}
 
-	request.TimeoutTunnel = &timeoutTunnel
+	request.TimeoutTunnel = timeoutTunnel
 
 	onMarkedDownAction, err := getOnMarkedDownAction(service)
 	if err != nil {
@@ -1106,26 +1106,26 @@ func (l *loadbalancers) makeCreateBackendRequest(loadbalancer *scwlb.LB, nodePor
 	}
 	request.ProxyProtocol = proxyProtocol
 
-	timeoutServer, err := getTimeoutServer(service)
+	timeoutServer, err := getOptTimeoutServer(service)
 	if err != nil {
 		return nil, err
 	}
 
-	request.TimeoutServer = &timeoutServer
+	request.TimeoutServer = timeoutServer
 
-	timeoutConnect, err := getTimeoutConnect(service)
+	timeoutConnect, err := getOptTimeoutConnect(service)
 	if err != nil {
 		return nil, err
 	}
 
-	request.TimeoutConnect = &timeoutConnect
+	request.TimeoutConnect = timeoutConnect
 
-	timeoutTunnel, err := getTimeoutTunnel(service)
+	timeoutTunnel, err := getOptTimeoutTunnel(service)
 	if err != nil {
 		return nil, err
 	}
 
-	request.TimeoutTunnel = &timeoutTunnel
+	request.TimeoutTunnel = timeoutTunnel
 
 	onMarkedDownAction, err := getOnMarkedDownAction(service)
 	if err != nil {
@@ -1390,64 +1390,64 @@ func getProxyProtocol(service *v1.Service, nodePort int32) (scwlb.ProxyProtocol,
 	return getSendProxyV2(service, nodePort)
 }
 
-func getTimeoutClient(service *v1.Service) (time.Duration, error) {
+func getOptTimeoutClient(service *v1.Service) (*time.Duration, error) {
 	timeoutClient, ok := service.Annotations[serviceAnnotationLoadBalancerTimeoutClient]
 	if !ok {
-		return time.ParseDuration("10m")
+		return nil, nil
 	}
 
 	timeoutClientDuration, err := time.ParseDuration(timeoutClient)
 	if err != nil {
 		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerTimeoutClient)
-		return time.Duration(0), errLoadBalancerInvalidAnnotation
+		return nil, errLoadBalancerInvalidAnnotation
 	}
 
-	return timeoutClientDuration, nil
+	return &timeoutClientDuration, nil
 }
 
-func getTimeoutServer(service *v1.Service) (time.Duration, error) {
+func getOptTimeoutServer(service *v1.Service) (*time.Duration, error) {
 	timeoutServer, ok := service.Annotations[serviceAnnotationLoadBalancerTimeoutServer]
 	if !ok {
-		return time.ParseDuration("10m")
+		return nil, nil
 	}
 
 	timeoutServerDuration, err := time.ParseDuration(timeoutServer)
 	if err != nil {
 		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerTimeoutServer)
-		return time.Duration(0), errLoadBalancerInvalidAnnotation
+		return nil, errLoadBalancerInvalidAnnotation
 	}
 
-	return timeoutServerDuration, nil
+	return &timeoutServerDuration, nil
 }
 
-func getTimeoutConnect(service *v1.Service) (time.Duration, error) {
+func getOptTimeoutConnect(service *v1.Service) (*time.Duration, error) {
 	timeoutConnect, ok := service.Annotations[serviceAnnotationLoadBalancerTimeoutConnect]
 	if !ok {
-		return time.ParseDuration("10m")
+		return nil, nil
 	}
 
 	timeoutConnectDuration, err := time.ParseDuration(timeoutConnect)
 	if err != nil {
 		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerTimeoutConnect)
-		return time.Duration(0), errLoadBalancerInvalidAnnotation
+		return nil, errLoadBalancerInvalidAnnotation
 	}
 
-	return timeoutConnectDuration, nil
+	return &timeoutConnectDuration, nil
 }
 
-func getTimeoutTunnel(service *v1.Service) (time.Duration, error) {
+func getOptTimeoutTunnel(service *v1.Service) (*time.Duration, error) {
 	timeoutTunnel, ok := service.Annotations[serviceAnnotationLoadBalancerTimeoutTunnel]
 	if !ok {
-		return time.ParseDuration("10m")
+		return nil, nil
 	}
 
 	timeoutTunnelDuration, err := time.ParseDuration(timeoutTunnel)
 	if err != nil {
 		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerTimeoutTunnel)
-		return time.Duration(0), errLoadBalancerInvalidAnnotation
+		return nil, errLoadBalancerInvalidAnnotation
 	}
 
-	return timeoutTunnelDuration, nil
+	return &timeoutTunnelDuration, nil
 }
 
 func getOnMarkedDownAction(service *v1.Service) (scwlb.OnMarkedDownAction, error) {

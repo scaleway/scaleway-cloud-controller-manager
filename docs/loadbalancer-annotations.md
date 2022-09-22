@@ -97,19 +97,19 @@ This is the annotation to set the load balancer offer type.
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-timeout-client`
 This is the annotation to set the maximum client connection inactivity time.
-The default value is `10m`. The duration are go's time.Duration (ex: `1s`, `2m`, `4h`, ...).
+The duration are go's time.Duration (ex: `1s`, `2m`, `4h`, ...).
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-timeout-server`
 This is the annotation to set the maximum server connection inactivity time.
-The default value is `10m`. The duration are go's time.Duration (ex: `1s`, `2m`, `4h`, ...).
+The duration are go's time.Duration (ex: `1s`, `2m`, `4h`, ...).
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-timeout-connect`
 This is the annotation to set the maximum initial server connection establishment time.
-The default value is `10m`. The duration are go's time.Duration (ex: `1s`, `2m`, `4h`, ...).
+The duration are go's time.Duration (ex: `1s`, `2m`, `4h`, ...).
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-timeout-tunnel`
 This is the annotation to set the maximum tunnel inactivity time.
-The default value is `10m`. The duration are go's time.Duration (ex: `1s`, `2m`, `4h`, ...).
+The duration are go's time.Duration (ex: `1s`, `2m`, `4h`, ...).
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-on-marked-down-action`
 This is the annotation that modifes what occurs when a backend server is marked down.
