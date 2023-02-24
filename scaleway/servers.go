@@ -35,9 +35,9 @@ type servers struct {
 	baremetal Servers
 }
 
-func newServers(client *client) Servers {
+func newServers(client *client, pnID string) Servers {
 	return &servers{
-		instances: newInstances(client),
+		instances: newInstances(client, pnID),
 		baremetal: newBaremetal(client),
 	}
 }

@@ -159,10 +159,10 @@ func TestInstances_NodeAddresses(t *testing.T) {
 	t.Run("WithPublic", func(t *testing.T) {
 		expectedAddresses := []v1.NodeAddress{
 			{Type: v1.NodeHostName, Address: "scw-nervous-mccarthy"},
-			{Type: v1.NodeInternalIP, Address: "10.14.0.1"},
-			{Type: v1.NodeInternalDNS, Address: "232bf860-9ffe-4b08-97da-158c0316ed15.priv.instances.scw.cloud"},
 			{Type: v1.NodeExternalIP, Address: "62.210.16.2"},
 			{Type: v1.NodeExternalDNS, Address: "232bf860-9ffe-4b08-97da-158c0316ed15.pub.instances.scw.cloud"},
+			{Type: v1.NodeInternalIP, Address: "10.14.0.1"},
+			{Type: v1.NodeInternalDNS, Address: "232bf860-9ffe-4b08-97da-158c0316ed15.priv.instances.scw.cloud"},
 		}
 
 		returnedAddresses, err := instance.NodeAddresses(context.TODO(), "scw-nervous-mccarthy")
@@ -189,10 +189,10 @@ func TestInstances_NodeAddressesByProviderID(t *testing.T) {
 	t.Run("WithPublic", func(t *testing.T) {
 		expectedAddresses := []v1.NodeAddress{
 			{Type: v1.NodeHostName, Address: "scw-nervous-mccarthy"},
-			{Type: v1.NodeInternalIP, Address: "10.14.0.1"},
-			{Type: v1.NodeInternalDNS, Address: "232bf860-9ffe-4b08-97da-158c0316ed15.priv.instances.scw.cloud"},
 			{Type: v1.NodeExternalIP, Address: "62.210.16.2"},
 			{Type: v1.NodeExternalDNS, Address: "232bf860-9ffe-4b08-97da-158c0316ed15.pub.instances.scw.cloud"},
+			{Type: v1.NodeInternalIP, Address: "10.14.0.1"},
+			{Type: v1.NodeInternalDNS, Address: "232bf860-9ffe-4b08-97da-158c0316ed15.priv.instances.scw.cloud"},
 		}
 
 		returnedAddresses, err := instance.NodeAddressesByProviderID(context.TODO(), "scaleway://instance/fr-par-1/232bf860-9ffe-4b08-97da-158c0316ed15")
@@ -517,10 +517,10 @@ func TestInstances_InstanceMetadata(t *testing.T) {
 	instance := newFakeInstances()
 	expectedAddresses := []v1.NodeAddress{
 		{Type: v1.NodeHostName, Address: "scw-nervous-mccarthy"},
-		{Type: v1.NodeInternalIP, Address: "10.14.0.1"},
-		{Type: v1.NodeInternalDNS, Address: "232bf860-9ffe-4b08-97da-158c0316ed15.priv.instances.scw.cloud"},
 		{Type: v1.NodeExternalIP, Address: "62.210.16.2"},
 		{Type: v1.NodeExternalDNS, Address: "232bf860-9ffe-4b08-97da-158c0316ed15.pub.instances.scw.cloud"},
+		{Type: v1.NodeInternalIP, Address: "10.14.0.1"},
+		{Type: v1.NodeInternalDNS, Address: "232bf860-9ffe-4b08-97da-158c0316ed15.priv.instances.scw.cloud"},
 	}
 
 	providerID := "scaleway://instance/fr-par-1/232bf860-9ffe-4b08-97da-158c0316ed15"
