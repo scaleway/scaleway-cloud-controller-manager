@@ -34,10 +34,10 @@ type ServersZones interface {
 	GetZoneByNodeName(ctx context.Context, nodeName types.NodeName) (cloudprovider.Zone, error)
 }
 
-func newZones(client *client) *zones {
+func newZones(client *client, pnID string) *zones {
 	region, _ := client.scaleway.GetDefaultRegion()
 	return &zones{
-		servers: newServers(client),
+		servers: newServers(client, pnID),
 		region:  region,
 	}
 }
