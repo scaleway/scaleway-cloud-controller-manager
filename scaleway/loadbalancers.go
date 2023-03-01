@@ -168,6 +168,7 @@ type loadbalancers struct {
 	api           LoadBalancerAPI
 	client        *client // for patcher
 	defaultLBType string
+	pnID          string
 }
 
 type LoadBalancerAPI interface {
@@ -192,9 +193,12 @@ type LoadBalancerAPI interface {
 	DeleteACL(req *scwlb.ZonedAPIDeleteACLRequest, opts ...scw.RequestOption) error
 	UpdateACL(req *scwlb.ZonedAPIUpdateACLRequest, opts ...scw.RequestOption) (*scwlb.ACL, error)
 	SetACLs(req *scwlb.ZonedAPISetACLsRequest, opts ...scw.RequestOption) (*scwlb.SetACLsResponse, error)
+	ListLBPrivateNetworks(req *scwlb.ZonedAPIListLBPrivateNetworksRequest, opts ...scw.RequestOption) (*scwlb.ListLBPrivateNetworksResponse, error)
+	AttachPrivateNetwork(req *scwlb.ZonedAPIAttachPrivateNetworkRequest, opts ...scw.RequestOption) (*scwlb.PrivateNetwork, error)
+	DetachPrivateNetwork(req *scwlb.ZonedAPIDetachPrivateNetworkRequest, opts ...scw.RequestOption) error
 }
 
-func newLoadbalancers(client *client, defaultLBType string) *loadbalancers {
+func newLoadbalancers(client *client, defaultLBType, pnID string) *loadbalancers {
 	lbType := "lb-s"
 	if defaultLBType != "" {
 		lbType = strings.ToLower(defaultLBType)
@@ -203,6 +207,7 @@ func newLoadbalancers(client *client, defaultLBType string) *loadbalancers {
 		api:           scwlb.NewZonedAPI(client.scaleway),
 		client:        client,
 		defaultLBType: lbType,
+		pnID:          pnID,
 	}
 }
 
@@ -567,6 +572,46 @@ func (l *loadbalancers) unannotateAndPatch(service *v1.Service) error {
 }
 
 func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *scwlb.LB, service *v1.Service, nodes []*v1.Node) error {
+	if l.pnID != "" {
+		respPN, err := l.api.ListLBPrivateNetworks(&scwlb.ZonedAPIListLBPrivateNetworksRequest{
+			Zone: loadbalancer.Zone,
+			LBID: loadbalancer.ID,
+		})
+		if err != nil {
+			return fmt.Errorf("error listing private networks of load balancer %s: %v", loadbalancer.ID, err)
+		}
+
+		var pnNIC *scwlb.PrivateNetwork
+		for _, pNIC := range respPN.PrivateNetwork {
+			if pNIC.PrivateNetworkID == l.pnID {
+				pnNIC = pNIC
+				continue
+			}
+
+			// this PN should not be attached to this loadbalancer
+			err = l.api.DetachPrivateNetwork(&scwlb.ZonedAPIDetachPrivateNetworkRequest{
+				Zone:             loadbalancer.Zone,
+				LBID:             loadbalancer.ID,
+				PrivateNetworkID: pNIC.PrivateNetworkID,
+			})
+			if err != nil {
+				return fmt.Errorf("unable to detach unmatched private network %s from %s: %v", pNIC.PrivateNetworkID, loadbalancer.ID, err)
+			}
+		}
+
+		if pnNIC == nil {
+			_, err = l.api.AttachPrivateNetwork(&scwlb.ZonedAPIAttachPrivateNetworkRequest{
+				Zone:             loadbalancer.Zone,
+				LBID:             loadbalancer.ID,
+				PrivateNetworkID: l.pnID,
+				IpamConfig:       &scwlb.PrivateNetworkIpamConfig{},
+			})
+			if err != nil {
+				return fmt.Errorf("unable to attach private network on %s: %v", loadbalancer.ID, err)
+			}
+		}
+	}
+
 	// List all frontends associated with the LB
 	respFrontends, err := l.api.ListFrontends(&scwlb.ZonedAPIListFrontendsRequest{
 		Zone: loadbalancer.Zone,
@@ -677,7 +722,7 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 			}
 
 			var serverIPs []string
-			if getForceInternalIP(service) {
+			if getForceInternalIP(service) || l.pnID != "" {
 				serverIPs = extractNodesInternalIps(nodes)
 			} else {
 				serverIPs = extractNodesExternalIps(nodes)

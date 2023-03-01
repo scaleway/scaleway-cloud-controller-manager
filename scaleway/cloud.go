@@ -50,6 +50,8 @@ const (
 
 	// loadBalancerDefaultTypeEnv is the environment to choose the default LB type
 	loadBalancerDefaultTypeEnv = "LB_DEFAULT_TYPE"
+
+	privateNetworkID = "PN_ID"
 )
 
 type cloud struct {
@@ -92,9 +94,9 @@ func newCloud(config io.Reader) (cloudprovider.Interface, error) {
 
 	client := newClient(scwClient)
 
-	instancesInterface := newServers(client)
-	loadbalancerInterface := newLoadbalancers(client, os.Getenv(loadBalancerDefaultTypeEnv))
-	zonesInterface := newZones(client)
+	instancesInterface := newServers(client, os.Getenv(privateNetworkID))
+	loadbalancerInterface := newLoadbalancers(client, os.Getenv(loadBalancerDefaultTypeEnv), os.Getenv(privateNetworkID))
+	zonesInterface := newZones(client, os.Getenv(privateNetworkID))
 
 	for _, disableInterface := range strings.Split(os.Getenv(disableInterfacesEnv), ",") {
 		switch strings.ToLower(disableInterface) {

@@ -21,6 +21,7 @@ import (
 	"fmt"
 
 	scwinstance "github.com/scaleway/scaleway-sdk-go/api/instance/v1"
+	scwipam "github.com/scaleway/scaleway-sdk-go/api/ipam/v1alpha1"
 	"github.com/scaleway/scaleway-sdk-go/scw"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -29,7 +30,9 @@ import (
 )
 
 type instances struct {
-	api InstanceAPI
+	api  InstanceAPI
+	ipam IPAMAPI
+	pnID string
 }
 
 type InstanceAPI interface {
@@ -37,9 +40,15 @@ type InstanceAPI interface {
 	GetServer(req *scwinstance.GetServerRequest, opts ...scw.RequestOption) (*scwinstance.GetServerResponse, error)
 }
 
-func newInstances(client *client) *instances {
+type IPAMAPI interface {
+	ListIPs(req *scwipam.ListIPsRequest, opts ...scw.RequestOption) (*scwipam.ListIPsResponse, error)
+}
+
+func newInstances(client *client, pnID string) *instances {
 	return &instances{
-		api: scwinstance.NewAPI(client.scaleway),
+		api:  scwinstance.NewAPI(client.scaleway),
+		ipam: scwipam.NewAPI(client.scaleway),
+		pnID: pnID,
 	}
 }
 
@@ -49,7 +58,7 @@ func (i *instances) NodeAddresses(ctx context.Context, name types.NodeName) ([]v
 	if err != nil {
 		return nil, err
 	}
-	return instanceAddresses(server), nil
+	return i.instanceAddresses(server), nil
 }
 
 // NodeAddressesByProviderID returns the addresses of the specified instance.
@@ -59,7 +68,7 @@ func (i *instances) NodeAddressesByProviderID(ctx context.Context, providerID st
 	if err != nil {
 		return nil, err
 	}
-	return instanceAddresses(instanceServer), nil
+	return i.instanceAddresses(instanceServer), nil
 }
 
 // InstanceID returns the cloud provider ID of the node with the specified NodeName.
@@ -152,17 +161,9 @@ func (i *instances) GetZoneByNodeName(ctx context.Context, nodeName types.NodeNa
 // ===========================
 
 // instanceAddresses extracts NodeAdress from the server
-func instanceAddresses(server *scwinstance.Server) []v1.NodeAddress {
+func (i *instances) instanceAddresses(server *scwinstance.Server) []v1.NodeAddress {
 	addresses := []v1.NodeAddress{
 		{Type: v1.NodeHostName, Address: server.Hostname},
-	}
-
-	if server.PrivateIP != nil && *server.PrivateIP != "" {
-		addresses = append(
-			addresses,
-			v1.NodeAddress{Type: v1.NodeInternalIP, Address: *server.PrivateIP},
-			v1.NodeAddress{Type: v1.NodeInternalDNS, Address: fmt.Sprintf("%s.priv.instances.scw.cloud", server.ID)},
-		)
 	}
 
 	if server.PublicIP != nil {
@@ -170,6 +171,51 @@ func instanceAddresses(server *scwinstance.Server) []v1.NodeAddress {
 			addresses,
 			v1.NodeAddress{Type: v1.NodeExternalIP, Address: server.PublicIP.Address.String()},
 			v1.NodeAddress{Type: v1.NodeExternalDNS, Address: fmt.Sprintf("%s.pub.instances.scw.cloud", server.ID)},
+		)
+	}
+
+	var pnNIC *scwinstance.PrivateNIC
+	if i.pnID != "" {
+		for _, pNIC := range server.PrivateNics {
+			if pNIC.PrivateNetworkID == i.pnID {
+				pnNIC = pNIC
+				break
+			}
+		}
+	}
+
+	if pnNIC != nil {
+		region, _ := server.Zone.Region()
+		ips, err := i.ipam.ListIPs(&scwipam.ListIPsRequest{
+			ProjectID:    &server.Project,
+			ResourceType: scwipam.ResourceTypeInstancePrivateNic,
+			ResourceID:   &pnNIC.ID,
+			Region:       region,
+		})
+		if err != nil {
+			klog.Errorf("unable to query ipam for node %s: %v", server.Name, err)
+			return addresses
+		}
+
+		if len(ips.IPs) == 0 {
+			klog.Errorf("no private network ip for node %s", server.Name)
+			return addresses
+		}
+
+		addresses = append(
+			addresses,
+			v1.NodeAddress{Type: v1.NodeInternalIP, Address: ips.IPs[0].Address.IP.String()},
+		)
+
+		return addresses
+	}
+
+	// fallback to legacy private ip
+	if server.PrivateIP != nil && *server.PrivateIP != "" {
+		addresses = append(
+			addresses,
+			v1.NodeAddress{Type: v1.NodeInternalIP, Address: *server.PrivateIP},
+			v1.NodeAddress{Type: v1.NodeInternalDNS, Address: fmt.Sprintf("%s.priv.instances.scw.cloud", server.ID)},
 		)
 	}
 
@@ -322,7 +368,7 @@ func (i *instances) InstanceMetadata(ctx context.Context, node *v1.Node) (*cloud
 	return &cloudprovider.InstanceMetadata{
 		ProviderID:    BuildProviderID(InstanceTypeInstance, instance.Zone.String(), instance.ID),
 		InstanceType:  instance.CommercialType,
-		NodeAddresses: instanceAddresses(instance),
+		NodeAddresses: i.instanceAddresses(instance),
 		Region:        region.String(),
 		Zone:          instance.Zone.String(),
 	}, nil

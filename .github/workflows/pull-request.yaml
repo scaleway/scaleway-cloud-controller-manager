@@ -7,7 +7,7 @@ jobs:
   unit-test:
     strategy:
       matrix:
-        go-version: [1.15.x]
+        go-version: [1.17.x]
         platform: [ubuntu-latest]
     runs-on: ${{ matrix.platform }}
     steps:
@@ -16,7 +16,7 @@ jobs:
       with:
         go-version: ${{ matrix.go-version }}
     - name: checkout
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
       with:
         fetch-depth: 1
     - name: Run unit tests
@@ -24,7 +24,7 @@ jobs:
   build-test:
     strategy:
       matrix:
-        go-version: [1.15.x]
+        go-version: [1.17.x]
         platform: [ubuntu-latest]
         arch: [386, amd64, arm, arm64]
     runs-on: ${{ matrix.platform }}
