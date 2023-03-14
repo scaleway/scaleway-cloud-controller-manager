@@ -1061,7 +1061,7 @@ func (l *loadbalancers) makeCreateBackendRequest(loadbalancer *scwlb.LB, nodePor
 		return nil, err
 	}
 	var serverIPs []string
-	if getForceInternalIP(service) {
+	if getForceInternalIP(service) || l.pnID != "" {
 		serverIPs = extractNodesInternalIps(nodes)
 	} else {
 		serverIPs = extractNodesExternalIps(nodes)
