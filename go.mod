@@ -3,7 +3,7 @@ module github.com/scaleway/scaleway-cloud-controller-manager
 go 1.17
 
 require (
-	github.com/scaleway/scaleway-sdk-go v1.0.0-beta.13.0.20230302143234-9f130d2a60f8
+	github.com/scaleway/scaleway-sdk-go v1.0.0-beta.14.0.20230318120603-8df14b12fd02
 	github.com/spf13/pflag v1.0.5
 	k8s.io/api v0.21.0
 	k8s.io/apimachinery v0.21.0

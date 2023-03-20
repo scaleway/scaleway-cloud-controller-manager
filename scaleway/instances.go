@@ -190,6 +190,7 @@ func (i *instances) instanceAddresses(server *scwinstance.Server) []v1.NodeAddre
 			ProjectID:    &server.Project,
 			ResourceType: scwipam.ResourceTypeInstancePrivateNic,
 			ResourceID:   &pnNIC.ID,
+			IsIPv6:       scw.BoolPtr(false),
 			Region:       region,
 		})
 		if err != nil {
@@ -202,10 +203,12 @@ func (i *instances) instanceAddresses(server *scwinstance.Server) []v1.NodeAddre
 			return addresses
 		}
 
-		addresses = append(
-			addresses,
-			v1.NodeAddress{Type: v1.NodeInternalIP, Address: ips.IPs[0].Address.IP.String()},
-		)
+		for _, nicIP := range ips.IPs {
+			addresses = append(
+				addresses,
+				v1.NodeAddress{Type: v1.NodeInternalIP, Address: nicIP.Address.IP.String()},
+			)
+		}
 
 		return addresses
 	}
