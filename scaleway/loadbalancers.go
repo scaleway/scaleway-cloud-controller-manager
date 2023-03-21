@@ -57,15 +57,15 @@ const (
 	serviceAnnotationLoadBalancerHealthCheckType = "service.beta.kubernetes.io/scw-loadbalancer-health-check-type"
 
 	// serviceAnnotationLoadBalancerHealthCheckDelay is the time between two consecutive health checks
-	// The default value is "10s". The duration are go's time.Duration (ex: "1s", "2m", "4h", ...)
+	// The default value is "5s". The duration are go's time.Duration (ex: "1s", "2m", "4h", ...)
 	serviceAnnotationLoadBalancerHealthCheckDelay = "service.beta.kubernetes.io/scw-loadbalancer-health-check-delay"
 
 	// serviceAnnotationLoadBalancerHealthCheckTimeout is the additional check timeout, after the connection has been already established
-	// The default value is "10s". The duration are go's time.Duration (ex: "1s", "2m", "4h", ...)
+	// The default value is "5s". The duration are go's time.Duration (ex: "1s", "2m", "4h", ...)
 	serviceAnnotationLoadBalancerHealthCheckTimeout = "service.beta.kubernetes.io/scw-loadbalancer-health-check-timeout"
 
 	// serviceAnnotationLoadBalancerHealthCheckMaxRetries is the number of consecutive unsuccessful health checks, after wich the server will be considered dead
-	// The default value is "10".
+	// The default value is "5".
 	serviceAnnotationLoadBalancerHealthCheckMaxRetries = "service.beta.kubernetes.io/scw-loadbalancer-health-check-max-retries"
 
 	// serviceAnnotationLoadBalancerHealthCheckHTTPURI is the URI that is used by the "http" health check
@@ -124,7 +124,7 @@ const (
 	serviceAnnotationLoadBalancerTimeoutServer = "service.beta.kubernetes.io/scw-loadbalancer-timeout-server"
 
 	// serviceAnnotationLoadBalancerTimeoutConnect is the maximum initical server connection establishment time
-	// The default value is "10m". The duration are go's time.Duration (ex: "1s", "2m", "4h", ...)
+	// The default value is "10s". The duration are go's time.Duration (ex: "1s", "2m", "4h", ...)
 	serviceAnnotationLoadBalancerTimeoutConnect = "service.beta.kubernetes.io/scw-loadbalancer-timeout-connect"
 
 	// serviceAnnotationLoadBalancerTimeoutTunnel is the maximum tunnel inactivity time
@@ -1408,7 +1408,7 @@ func getTimeoutClient(service *v1.Service) (time.Duration, error) {
 func getTimeoutServer(service *v1.Service) (time.Duration, error) {
 	timeoutServer, ok := service.Annotations[serviceAnnotationLoadBalancerTimeoutServer]
 	if !ok {
-		return time.ParseDuration("10m")
+		return time.ParseDuration("10s")
 	}
 
 	timeoutServerDuration, err := time.ParseDuration(timeoutServer)
@@ -1469,7 +1469,7 @@ func getOnMarkedDownAction(service *v1.Service) (scwlb.OnMarkedDownAction, error
 func getHealthCheckDelay(service *v1.Service) (time.Duration, error) {
 	healthCheckDelay, ok := service.Annotations[serviceAnnotationLoadBalancerHealthCheckDelay]
 	if !ok {
-		return time.ParseDuration("10s")
+		return time.ParseDuration("5s")
 	}
 
 	healthCheckDelayDuration, err := time.ParseDuration(healthCheckDelay)
@@ -1484,7 +1484,7 @@ func getHealthCheckDelay(service *v1.Service) (time.Duration, error) {
 func getHealthCheckTimeout(service *v1.Service) (time.Duration, error) {
 	healthCheckTimeout, ok := service.Annotations[serviceAnnotationLoadBalancerHealthCheckTimeout]
 	if !ok {
-		return time.ParseDuration("10s")
+		return time.ParseDuration("5s")
 	}
 
 	healthCheckTimeoutDuration, err := time.ParseDuration(healthCheckTimeout)
@@ -1499,7 +1499,7 @@ func getHealthCheckTimeout(service *v1.Service) (time.Duration, error) {
 func getHealthCheckMaxRetries(service *v1.Service) (int32, error) {
 	healthCheckMaxRetries, ok := service.Annotations[serviceAnnotationLoadBalancerHealthCheckMaxRetries]
 	if !ok {
-		return 10, nil
+		return 5, nil
 	}
 
 	healthCheckMaxRetriesInt, err := strconv.Atoi(healthCheckMaxRetries)

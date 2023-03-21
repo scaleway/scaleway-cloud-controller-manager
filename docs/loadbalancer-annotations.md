@@ -49,15 +49,15 @@ NB: depending on the type, some other annotations are required, see below.
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-health-check-delay`
 This is the annotation to set the time between two consecutive health checks.
-The default value is `10s`. The duration are go's time.Duration (ex: `1s`, `2m`, `4h`, ...).
+The default value is `5s`. The duration are go's time.Duration (ex: `1s`, `2m`, `4h`, ...).
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-health-check-timeout`
 This is the annotaton to set the additional check timeout, after the connection has been already established.
-The default value is `10s`. The duration are go's time.Duration (ex: `1s`, `2m`, `4h`, ...).
+The default value is `5s`. The duration are go's time.Duration (ex: `1s`, `2m`, `4h`, ...).
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-health-check-max-retries`
 This is the annotation to set the number of consecutive unsuccessful health checks, after wich the server will be considered dead.
-The default value is `10`.
+The default value is `5`.
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-health-check-http-uri`
 This is the annotation to set the URI that is used by the `http` health check.
@@ -105,7 +105,7 @@ The default value is `10m`. The duration are go's time.Duration (ex: `1s`, `2m`,
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-timeout-connect`
 This is the annotation to set the maximum initial server connection establishment time.
-The default value is `10m`. The duration are go's time.Duration (ex: `1s`, `2m`, `4h`, ...).
+The default value is `10s`. The duration are go's time.Duration (ex: `1s`, `2m`, `4h`, ...).
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-timeout-tunnel`
 This is the annotation to set the maximum tunnel inactivity time.
