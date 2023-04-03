@@ -28,6 +28,7 @@ import (
 	scwlb "github.com/scaleway/scaleway-sdk-go/api/lb/v1"
 	"github.com/scaleway/scaleway-sdk-go/scw"
 	"github.com/scaleway/scaleway-sdk-go/validation"
+	"google.golang.org/protobuf/types/known/durationpb"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 )
@@ -59,6 +60,10 @@ const (
 	// serviceAnnotationLoadBalancerHealthCheckDelay is the time between two consecutive health checks
 	// The default value is "5s". The duration are go's time.Duration (ex: "1s", "2m", "4h", ...)
 	serviceAnnotationLoadBalancerHealthCheckDelay = "service.beta.kubernetes.io/scw-loadbalancer-health-check-delay"
+
+	// serviceAnnotationLoadBalancerHealthTransientCheckDelay is the time between two consecutive health checks on transient state (going UP or DOWN)
+	// The default value is "0.5s". The duration are go's time.Duration (ex: "1s", "2m", "4h", ...)
+	serviceAnnotationLoadBalancerHealthTransientCheckDelay = "service.beta.kubernetes.io/scw-loadbalancer-health-transient-check-delay"
 
 	// serviceAnnotationLoadBalancerHealthCheckTimeout is the additional check timeout, after the connection has been already established
 	// The default value is "5s". The duration are go's time.Duration (ex: "1s", "2m", "4h", ...)
@@ -160,6 +165,14 @@ const (
 	// serviceAnnotationLoadBalancerTargetNodeLabels is the annotation to target nodes with specific label(s)
 	// Expected format: "Key1=Val1,Key2=Val2"
 	serviceAnnotationLoadBalancerTargetNodeLabels = "service.beta.kubernetes.io/scw-loadbalancer-target-node-labels"
+
+	// serviceAnnotationLoadBalancerRedispatchAttemptCount is the annotation to activate redispatch on another backend server in case of failure
+	// The default value is "0", which disable the redispatch
+	serviceAnnotationLoadBalancerRedispatchAttemptCount = "service.beta.kubernetes.io/scw-loadbalancer-redispatch-attempt-count"
+
+	// serviceAnnotationLoadBalancerMaxRetries is the annotation to configure the number of retry on connection failure
+	// The default value is 3.
+	serviceAnnotationLoadBalancerMaxRetries = "service.beta.kubernetes.io/scw-loadbalancer-max-retries"
 )
 
 const MaxEntriesPerACL = 60
@@ -969,6 +982,20 @@ func (l *loadbalancers) makeUpdateBackendRequest(backend *scwlb.Backend, service
 
 	request.OnMarkedDownAction = onMarkedDownAction
 
+	redispatchAttemptCount, err := getRedisatchAttemptCount(service)
+	if err != nil {
+		return nil, err
+	}
+
+	request.RedispatchAttemptCount = redispatchAttemptCount
+
+	maxRetries, err := getMaxRetries(service)
+	if err != nil {
+		return nil, err
+	}
+
+	request.MaxRetries = maxRetries
+
 	return request, nil
 }
 
@@ -998,6 +1025,13 @@ func (l *loadbalancers) makeUpdateHealthCheckRequest(backend *scwlb.Backend, nod
 	}
 
 	request.CheckMaxRetries = healthCheckMaxRetries
+
+	transientCheckDelay, err := getHealthCheckTransientCheckDelay(service)
+	if err != nil {
+		return nil, err
+	}
+
+	request.TransientCheckDelay = transientCheckDelay
 
 	healthCheckType, err := getHealthCheckType(service, nodePort)
 	if err != nil {
@@ -1156,6 +1190,12 @@ func (l *loadbalancers) makeCreateBackendRequest(loadbalancer *scwlb.LB, nodePor
 	if err != nil {
 		return nil, err
 	}
+
+	healthCheckTransientCheckDelay, err := getHealthCheckTransientCheckDelay(service)
+	if err != nil {
+		return nil, err
+	}
+	healthCheck.TransientCheckDelay = healthCheckTransientCheckDelay
 
 	healthCheck.CheckMaxRetries = healthCheckMaxRetries
 
@@ -1466,6 +1506,36 @@ func getOnMarkedDownAction(service *v1.Service) (scwlb.OnMarkedDownAction, error
 	return onMarkedDownActionValue, nil
 }
 
+func getRedisatchAttemptCount(service *v1.Service) (*int32, error) {
+	redispatchAttemptCount, ok := service.Annotations[serviceAnnotationLoadBalancerRedispatchAttemptCount]
+	if !ok {
+		return nil, nil
+	}
+	redispatchAttemptCountInt, err := strconv.Atoi(redispatchAttemptCount)
+	if err != nil {
+		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerRedispatchAttemptCount)
+		return nil, errLoadBalancerInvalidAnnotation
+
+	}
+	redispatchAttemptCountInt32 := int32(redispatchAttemptCountInt)
+	return &redispatchAttemptCountInt32, nil
+}
+
+func getMaxRetries(service *v1.Service) (*int32, error) {
+	maxRetriesCount, ok := service.Annotations[serviceAnnotationLoadBalancerMaxRetries]
+	if !ok {
+		return nil, nil
+	}
+	maxRetriesCountInt, err := strconv.Atoi(maxRetriesCount)
+	if err != nil {
+		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerMaxRetries)
+		return nil, errLoadBalancerInvalidAnnotation
+
+	}
+	maxRetriesCountInt32 := int32(maxRetriesCountInt)
+	return &maxRetriesCountInt32, nil
+}
+
 func getHealthCheckDelay(service *v1.Service) (time.Duration, error) {
 	healthCheckDelay, ok := service.Annotations[serviceAnnotationLoadBalancerHealthCheckDelay]
 	if !ok {
@@ -1509,6 +1579,25 @@ func getHealthCheckMaxRetries(service *v1.Service) (int32, error) {
 	}
 
 	return int32(healthCheckMaxRetriesInt), nil
+}
+
+func getHealthCheckTransientCheckDelay(service *v1.Service) (*scw.Duration, error) {
+	transientCheckDelay, ok := service.Annotations[serviceAnnotationLoadBalancerHealthTransientCheckDelay]
+	if !ok {
+		return nil, nil
+	}
+	transientCheckDelayDuration, err := time.ParseDuration(transientCheckDelay)
+	if err != nil {
+		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerHealthTransientCheckDelay)
+		return nil, errLoadBalancerInvalidAnnotation
+	}
+
+	durationpb := durationpb.New(transientCheckDelayDuration)
+
+	return &scw.Duration{
+		Seconds: durationpb.Seconds,
+		Nanos:   durationpb.Nanos,
+	}, nil
 }
 
 func getForceInternalIP(service *v1.Service) bool {
