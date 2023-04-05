@@ -207,7 +207,8 @@ func (b *baremetal) getServerByName(name string) (*scwbaremetal.Server, error) {
 	}
 
 	var server *scwbaremetal.Server
-	for _, zoneReq := range scw.AllZones {
+	allZones := (*scwbaremetal.API)(nil).Zones()
+	for _, zoneReq := range allZones {
 		resp, err := b.api.ListServers(&scwbaremetal.ListServersRequest{
 			Zone: zoneReq,
 			Name: &name,
