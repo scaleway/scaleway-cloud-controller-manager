@@ -22,7 +22,7 @@ You can get a list of working annotation on in the Scaleway loadBalancer [docume
 
 Note:
 - If an invalid mode is passed in the annotation, the service will throw an error.
-- If an annotation is not specified, the cloud controller manager will apply default configuration.  
+ If an annotation is not specified, the cloud controller manager will apply default configuration.
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-id`
 This annotation is the ID of the loadbalancer to use. It is populated by the CCM with the new LB ID if the annotation does not exist.
@@ -50,6 +50,10 @@ NB: depending on the type, some other annotations are required, see below.
 ### `service.beta.kubernetes.io/scw-loadbalancer-health-check-delay`
 This is the annotation to set the time between two consecutive health checks.
 The default value is `5s`. The duration are go's time.Duration (ex: `1s`, `2m`, `4h`, ...).
+
+### `service.beta.kubernetes.io/scw-loadbalancer-health-transient-check-delay`
+This is the annotation to set the time between two consecutive health checks in a transient state (going UP or DOWN).
+The default value is `0.5s`. The duration are go's time.Duration (ex: `1s`, `2m`, `4h`, ...).
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-health-check-timeout`
 This is the annotaton to set the additional check timeout, after the connection has been already established.
@@ -134,3 +138,11 @@ The possible format are:
  - `<certificate-id>`: will use this certificate for all frontends
  - `<certificate-id>,<certificate-id>` will use these certificates for all frontends
  - `<port1>:<certificate1-id>,<certificate2-id>;<port2>,<port3>:<certificate3-id>` will use certificate 1 and 2 for frontend with port port1 and certificate3 for frotend with port port2 and port3
+
+### `service.beta.kubernetes.io/scw-loadbalancer-redispatch-attempt-count`
+This is the annotation to activate redispatch on another backend server in case of failure
+The default value is 0, which disable the redispatch.
+
+### `service.beta.kubernetes.io/scw-loadbalancer-max-retries`
+This is the annotation to configure the number of retry on connection failure
+The default value is 2.
