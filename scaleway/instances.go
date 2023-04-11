@@ -244,7 +244,8 @@ func (i *instances) getServerByName(name string) (*scwinstance.Server, error) {
 	}
 
 	var instanceServer *scwinstance.Server
-	for _, zoneReq := range scw.AllZones {
+	allZones := (*scwinstance.API)(nil).Zones()
+	for _, zoneReq := range allZones {
 		resp, err := i.api.ListServers(&scwinstance.ListServersRequest{
 			Zone: zoneReq,
 			Name: &name,
