@@ -105,11 +105,11 @@ The default value is `10m`. The duration are go's time.Duration (ex: `1s`, `2m`,
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-timeout-server`
 This is the annotation to set the maximum server connection inactivity time.
-The default value is `10m`. The duration are go's time.Duration (ex: `1s`, `2m`, `4h`, ...).
+The default value is `10s`. The duration are go's time.Duration (ex: `1s`, `2m`, `4h`, ...).
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-timeout-connect`
 This is the annotation to set the maximum initial server connection establishment time.
-The default value is `10s`. The duration are go's time.Duration (ex: `1s`, `2m`, `4h`, ...).
+The default value is `10m`. The duration are go's time.Duration (ex: `1s`, `2m`, `4h`, ...).
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-timeout-tunnel`
 This is the annotation to set the maximum tunnel inactivity time.

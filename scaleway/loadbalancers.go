@@ -125,11 +125,11 @@ const (
 	serviceAnnotationLoadBalancerTimeoutClient = "service.beta.kubernetes.io/scw-loadbalancer-timeout-client"
 
 	// serviceAnnotationLoadBalancerTimeoutServer is the maximum server connection inactivity time
-	// The default value is "10m". The duration are go's time.Duration (ex: "1s", "2m", "4h", ...)
+	// The default value is "10s". The duration are go's time.Duration (ex: "1s", "2m", "4h", ...)
 	serviceAnnotationLoadBalancerTimeoutServer = "service.beta.kubernetes.io/scw-loadbalancer-timeout-server"
 
 	// serviceAnnotationLoadBalancerTimeoutConnect is the maximum initical server connection establishment time
-	// The default value is "10s". The duration are go's time.Duration (ex: "1s", "2m", "4h", ...)
+	// The default value is "10m". The duration are go's time.Duration (ex: "1s", "2m", "4h", ...)
 	serviceAnnotationLoadBalancerTimeoutConnect = "service.beta.kubernetes.io/scw-loadbalancer-timeout-connect"
 
 	// serviceAnnotationLoadBalancerTimeoutTunnel is the maximum tunnel inactivity time
