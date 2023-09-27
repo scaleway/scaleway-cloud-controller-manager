@@ -1,7 +1,5 @@
 # Scaleway LoadBalancer Annotations
 
-This link defines how LoadBalancer [services](https://kubernetes.io/docs/concepts/services-networking/service/#internal-load-balancer) (`type: LoadBalancer`) annotations are working.
-
 For Scaleway LoadBalancers annotations are prefixed with `service.beta.kubernetes.io/`. For example:
 
 ```yaml
@@ -125,7 +123,7 @@ Normally, the cloud controller manager use ExternalIP to be nodes region-free (o
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-use-hostname`
 This is the annotation that force the use of the LB hostname instead of the public IP.
-This is useful when it it needed to not bypass the LoadBalacer for traffic coming from the cluster.
+This is useful when it is needed to not bypass the LoadBalacer for traffic coming from the cluster.
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-protocol-http`
 This is the annotation to set the forward protocol of the LB to HTTP.
@@ -146,3 +144,7 @@ The default value is 0, which disable the redispatch.
 ### `service.beta.kubernetes.io/scw-loadbalancer-max-retries`
 This is the annotation to configure the number of retry on connection failure
 The default value is 2.
+
+### `service.beta.kubernetes.io/scw-loadbalancer-private`
+This is the annotation to configure the LB to be private or public
+The LB will be public if unset or false.
