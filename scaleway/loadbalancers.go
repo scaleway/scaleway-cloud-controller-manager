@@ -20,17 +20,21 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"net"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
-	scwlb "github.com/scaleway/scaleway-sdk-go/api/lb/v1"
-	"github.com/scaleway/scaleway-sdk-go/scw"
-	"github.com/scaleway/scaleway-sdk-go/validation"
 	"google.golang.org/protobuf/types/known/durationpb"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
+
+	scwipam "github.com/scaleway/scaleway-sdk-go/api/ipam/v1alpha1"
+	scwlb "github.com/scaleway/scaleway-sdk-go/api/lb/v1"
+	scwvpc "github.com/scaleway/scaleway-sdk-go/api/vpc/v2"
+	"github.com/scaleway/scaleway-sdk-go/scw"
+	"github.com/scaleway/scaleway-sdk-go/validation"
 )
 
 const (
@@ -145,7 +149,7 @@ const (
 	serviceAnnotationLoadBalancerForceInternalIP = "service.beta.kubernetes.io/scw-loadbalancer-force-internal-ip"
 
 	// serviceAnnotationLoadBalancerUseHostname is the annotation that force the use of the LB hostname instead of the public IP.
-	// This is useful when it it needed to not bypass the LoadBalacer for traffic coming from the cluster
+	// This is useful when it is needed to not bypass the LoadBalacer for traffic coming from the cluster
 	serviceAnnotationLoadBalancerUseHostname = "service.beta.kubernetes.io/scw-loadbalancer-use-hostname"
 
 	// serviceAnnotationLoadBalancerProtocolHTTP is the annotation to set the forward protocol of the LB to HTTP
@@ -173,15 +177,25 @@ const (
 	// serviceAnnotationLoadBalancerMaxRetries is the annotation to configure the number of retry on connection failure
 	// The default value is 3.
 	serviceAnnotationLoadBalancerMaxRetries = "service.beta.kubernetes.io/scw-loadbalancer-max-retries"
+
+	// serviceAnnotationLoadBalancerPrivate is the annotation to configure the LB to be private or public
+	// The LB will be public if unset or false.
+	serviceAnnotationLoadBalancerPrivate = "service.beta.kubernetes.io/scw-loadbalancer-private"
 )
 
 const MaxEntriesPerACL = 60
 
 type loadbalancers struct {
 	api           LoadBalancerAPI
+	ipam          IPAMAPI
+	vpc           VPCAPI
 	client        *client // for patcher
 	defaultLBType string
 	pnID          string
+}
+
+type VPCAPI interface {
+	GetPrivateNetwork(req *scwvpc.GetPrivateNetworkRequest, opts ...scw.RequestOption) (*scwvpc.PrivateNetwork, error)
 }
 
 type LoadBalancerAPI interface {
@@ -218,6 +232,8 @@ func newLoadbalancers(client *client, defaultLBType, pnID string) *loadbalancers
 	}
 	return &loadbalancers{
 		api:           scwlb.NewZonedAPI(client.scaleway),
+		ipam:          scwipam.NewAPI(client.scaleway),
+		vpc:           scwvpc.NewAPI(client.scaleway),
 		client:        client,
 		defaultLBType: lbType,
 		pnID:          pnID,
@@ -236,25 +252,29 @@ func (l *loadbalancers) GetLoadBalancer(ctx context.Context, clusterName string,
 	lb, err := l.fetchLoadBalancer(ctx, clusterName, service)
 	if err != nil {
 		if err == LoadBalancerNotFound {
-			klog.Infof("no load balancer found for service %s", service.Name)
+			klog.Infof("no load balancer found for service %s/%s", service.Namespace, service.Name)
 			return nil, false, nil
 		}
 
-		klog.Errorf("error getting load balancer for service %s: %v", service.Name, err)
+		klog.Errorf("error getting load balancer for service %s/%s: %v", service.Namespace, service.Name, err)
 		return nil, false, err
 	}
 
-	status := &v1.LoadBalancerStatus{}
-	status.Ingress = make([]v1.LoadBalancerIngress, len(lb.IP))
-	for idx, ip := range lb.IP {
-		if getUseHostname(service) {
-			status.Ingress[idx].Hostname = ip.Reverse
-		} else {
-			status.Ingress[idx].IP = ip.IPAddress
-		}
+	status, err := l.createServiceStatus(service, lb)
+	if err != nil {
+		klog.Errorf("error getting loadbalancer status for service %s/%s: %v", service.Namespace, service.Name, err)
+		return nil, true, err
 	}
-
 	return status, true, nil
+}
+
+// GetLoadBalancerName returns the name of the load balancer. Implementations must treat the
+// *v1.Service parameter as read-only and not modify it.
+func (l *loadbalancers) GetLoadBalancerName(ctx context.Context, clusterName string, service *v1.Service) string {
+	loadbalancerPrefix := os.Getenv(scwCcmPrefixEnv)
+	kubelbName := string(service.UID)
+
+	return loadbalancerPrefix + kubelbName
 }
 
 // EnsureLoadBalancer creates a new load balancer 'name', or updates the existing one. Returns the status of the balancer
@@ -263,7 +283,20 @@ func (l *loadbalancers) GetLoadBalancer(ctx context.Context, clusterName string,
 // Parameter 'clusterName' is the name of the cluster as presented to kube-controller-manager
 func (l *loadbalancers) EnsureLoadBalancer(ctx context.Context, clusterName string, service *v1.Service, nodes []*v1.Node) (*v1.LoadBalancerStatus, error) {
 	if service.Spec.LoadBalancerClass != nil {
-		return nil, fmt.Errorf("scaleway-cloud-controller-manager cannot handle loadBalancerClas %s", *service.Spec.LoadBalancerClass)
+		return nil, fmt.Errorf("scaleway-cloud-controller-manager cannot handle loadBalancerClass %s", *service.Spec.LoadBalancerClass)
+	}
+
+	lbPrivate, err := svcPrivate(service)
+	if err != nil {
+		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerPrivate)
+		return nil, fmt.Errorf("invalid value for annotation %s: expected boolean", serviceAnnotationLoadBalancerPrivate)
+	}
+
+	if lbPrivate && l.pnID == "" {
+		return nil, fmt.Errorf("scaleway-cloud-controller-manager cannot create private load balancers without a private network")
+	}
+	if lbPrivate && service.Spec.LoadBalancerIP != "" {
+		return nil, fmt.Errorf("scaleway-cloud-controller-manager can only handle .spec.LoadBalancerIP for public load balancers. Unsetting the .spec.LoadBalancerIP can result in the loss of the IP")
 	}
 
 	lb, err := l.fetchLoadBalancer(ctx, clusterName, service)
@@ -278,11 +311,13 @@ func (l *loadbalancers) EnsureLoadBalancer(ctx context.Context, clusterName stri
 		}
 	default:
 		// any kind of Error
-		klog.Errorf("error getting loadbalancer for service %s: %v", service.Name, err)
+		klog.Errorf("error getting loadbalancer for service %s/%s: %v", service.Namespace, service.Name, err)
 		return nil, err
 	}
 
-	if service.Spec.LoadBalancerIP != "" && service.Spec.LoadBalancerIP != lb.IP[0].IPAddress {
+	privateModeMismatch := lbPrivate != (len(lb.IP) == 0)
+	reservedIPMismatch := service.Spec.LoadBalancerIP != "" && service.Spec.LoadBalancerIP != lb.IP[0].IPAddress
+	if privateModeMismatch || reservedIPMismatch {
 		err = l.deleteLoadBalancer(ctx, lb, service)
 		if err != nil {
 			return nil, err
@@ -302,18 +337,14 @@ func (l *loadbalancers) EnsureLoadBalancer(ctx context.Context, clusterName stri
 
 	err = l.updateLoadBalancer(ctx, lb, service, nodes)
 	if err != nil {
-		klog.Errorf("error updating loadbalancer for service %s: %v", service.Name, err)
+		klog.Errorf("error updating loadbalancer for service %s/%s: %v", service.Namespace, service.Name, err)
 		return nil, err
 	}
 
-	status := &v1.LoadBalancerStatus{}
-	status.Ingress = make([]v1.LoadBalancerIngress, len(lb.IP))
-	for idx, ip := range lb.IP {
-		if getUseHostname(service) {
-			status.Ingress[idx].Hostname = ip.Reverse
-		} else {
-			status.Ingress[idx].IP = ip.IPAddress
-		}
+	status, err := l.createServiceStatus(service, lb)
+	if err != nil {
+		klog.Errorf("error making loadbalancer status for service %s/%s: %v", service.Namespace, service.Name, err)
+		return nil, err
 	}
 
 	return status, nil
@@ -393,15 +424,6 @@ func (l *loadbalancers) deleteLoadBalancer(ctx context.Context, lb *scwlb.LB, se
 	}
 
 	return nil
-}
-
-// GetLoadBalancerName returns the name of the load balancer. Implementations must treat the
-// *v1.Service parameter as read-only and not modify it.
-func (l *loadbalancers) GetLoadBalancerName(ctx context.Context, clusterName string, service *v1.Service) string {
-	loadbalancerPrefix := os.Getenv(scwCcmPrefixEnv)
-	kubelbName := string(service.UID)
-
-	return loadbalancerPrefix + kubelbName
 }
 
 // get the nodes ip addresses
@@ -502,15 +524,21 @@ func (l *loadbalancers) createLoadBalancer(ctx context.Context, clusterName stri
 		scwCcmTagsDelimiter = ","
 	}
 
+	lbPrivate, err := svcPrivate(service)
+	if err != nil {
+		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerPrivate)
+		return nil, fmt.Errorf("invalid value for annotation %s: expected boolean", serviceAnnotationLoadBalancerPrivate)
+	}
+
 	var ipID *string
-	if service.Spec.LoadBalancerIP != "" {
+	if !lbPrivate && service.Spec.LoadBalancerIP != "" {
 		request := scwlb.ZonedAPIListIPsRequest{
 			IPAddress: &service.Spec.LoadBalancerIP,
 			Zone:      getLoadBalancerZone(service),
 		}
 		ipsResp, err := l.api.ListIPs(&request)
 		if err != nil {
-			klog.Errorf("error getting ip for service %s: %v", service.Name, err)
+			klog.Errorf("error getting ip for service %s/%s: %v", service.Namespace, service.Name, err)
 			return nil, fmt.Errorf("createLoadBalancer: error getting ip for service %s: %s", service.Name, err.Error())
 		}
 
@@ -539,18 +567,19 @@ func (l *loadbalancers) createLoadBalancer(ctx context.Context, clusterName stri
 	}
 
 	request := scwlb.ZonedAPICreateLBRequest{
-		Zone:        getLoadBalancerZone(service),
-		Name:        lbName,
-		Description: "kubernetes service " + service.Name,
-		Tags:        tags,
-		IPID:        ipID,
-		Type:        lbType,
+		Zone:             getLoadBalancerZone(service),
+		Name:             lbName,
+		Description:      "kubernetes service " + service.Name,
+		Tags:             tags,
+		IPID:             ipID,
+		Type:             lbType,
+		AssignFlexibleIP: scw.BoolPtr(!lbPrivate),
 	}
 
 	lb, err := l.api.CreateLB(&request)
 	if err != nil {
-		klog.Errorf("error creating load balancer for service %s: %v", service.Name, err)
-		return nil, fmt.Errorf("error creating load balancer for service %s: %v", service.Name, err)
+		klog.Errorf("error creating load balancer for service %s/%s: %v", service.Namespace, service.Name, err)
+		return nil, fmt.Errorf("error creating load balancer for service %s/%s: %v", service.Namespace, service.Name, err)
 	}
 
 	// annotate newly created loadBalancer
@@ -617,7 +646,7 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 				Zone:             loadbalancer.Zone,
 				LBID:             loadbalancer.ID,
 				PrivateNetworkID: l.pnID,
-				IpamConfig:       &scwlb.PrivateNetworkIpamConfig{},
+				DHCPConfig:       &scwlb.PrivateNetworkDHCPConfig{},
 			})
 			if err != nil {
 				return fmt.Errorf("unable to attach private network on %s: %v", loadbalancer.ID, err)
@@ -632,7 +661,7 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 	}, scw.WithAllPages())
 
 	if err != nil {
-		return fmt.Errorf("error updating load balancer %s: %v", loadbalancer.ID, err)
+		return fmt.Errorf("error listing frontends for load balancer %s: %v", loadbalancer.ID, err)
 	}
 
 	frontends := respFrontends.Frontends
@@ -696,7 +725,7 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 			})
 
 			if err != nil {
-				return fmt.Errorf("error deleing backend %s: %v", backend.ID, err)
+				return fmt.Errorf("error deleting backend %s: %v", backend.ID, err)
 			}
 		} else {
 			portBackends[backend.ForwardPort] = backend
@@ -1255,6 +1284,97 @@ func (l *loadbalancers) makeCreateBackendRequest(loadbalancer *scwlb.LB, nodePor
 	request.HealthCheck = healthCheck
 
 	return request, nil
+}
+
+// createPrivateServiceStatus creates a LoadBalancer status for services with private load balancers
+func (l *loadbalancers) createPrivateServiceStatus(service *v1.Service, lb *scwlb.LB) (*v1.LoadBalancerStatus, error) {
+	if l.pnID == "" {
+		return nil, fmt.Errorf("cannot make status for service %s/%s: private load balancer requires a private network", service.Namespace, service.Name)
+	}
+
+	region, err := lb.Zone.Region()
+	if err != nil {
+		return nil, fmt.Errorf("error making status for service %s/%s: %v", service.Namespace, service.Name, err)
+	}
+
+	status := &v1.LoadBalancerStatus{}
+
+	if getUseHostname(service) {
+		pn, err := l.vpc.GetPrivateNetwork(&scwvpc.GetPrivateNetworkRequest{
+			Region:           region,
+			PrivateNetworkID: l.pnID,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("unable to query private network for lb %s: %v", lb.Name, err)
+		}
+
+		status.Ingress = []v1.LoadBalancerIngress{
+			{
+				Hostname: fmt.Sprintf("%s.%s", lb.ID, pn.Name),
+			},
+		}
+	} else {
+		ipamRes, err := l.ipam.ListIPs(&scwipam.ListIPsRequest{
+			ProjectID:    &lb.ProjectID,
+			ResourceType: scwipam.ResourceTypeLBServer,
+			ResourceID:   &lb.ID,
+			IsIPv6:       scw.BoolPtr(false),
+			Region:       region,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("unable to query ipam for lb %s: %v", lb.Name, err)
+		}
+
+		if len(ipamRes.IPs) == 0 {
+			return nil, fmt.Errorf("no private network ip for lb %s", lb.Name)
+		}
+
+		status.Ingress = make([]v1.LoadBalancerIngress, len(ipamRes.IPs))
+		for idx, ip := range ipamRes.IPs {
+			status.Ingress[idx].IP = ip.Address.IP.String()
+		}
+	}
+
+	return status, nil
+}
+
+// createPublicServiceStatus creates a LoadBalancer status for services with public load balancers
+func (l *loadbalancers) createPublicServiceStatus(service *v1.Service, lb *scwlb.LB) (*v1.LoadBalancerStatus, error) {
+	status := &v1.LoadBalancerStatus{}
+	status.Ingress = make([]v1.LoadBalancerIngress, 0)
+	for _, ip := range lb.IP {
+		// Skip ipv6 entries
+		if i := net.ParseIP(ip.IPAddress); i.To4() == nil {
+			continue
+		}
+
+		if getUseHostname(service) {
+			status.Ingress = append(status.Ingress, v1.LoadBalancerIngress{Hostname: ip.Reverse})
+		} else {
+			status.Ingress = append(status.Ingress, v1.LoadBalancerIngress{IP: ip.IPAddress})
+		}
+	}
+
+	if len(status.Ingress) == 0 {
+		return nil, fmt.Errorf("no ipv4 found for lb %s", lb.Name)
+	}
+
+	return status, nil
+}
+
+// createServiceStatus creates a LoadBalancer status for the service
+func (l *loadbalancers) createServiceStatus(service *v1.Service, lb *scwlb.LB) (*v1.LoadBalancerStatus, error) {
+	lbPrivate, err := svcPrivate(service)
+	if err != nil {
+		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerPrivate)
+		return nil, fmt.Errorf("invalid value for annotation %s: expected boolean", serviceAnnotationLoadBalancerPrivate)
+	}
+
+	if lbPrivate {
+		return l.createPrivateServiceStatus(service, lb)
+	}
+
+	return l.createPublicServiceStatus(service, lb)
 }
 
 func getLoadBalancerID(service *v1.Service) (scw.Zone, string, error) {
@@ -1875,6 +1995,14 @@ func getHTTPSHealthCheck(service *v1.Service, nodePort int32) (*scwlb.HealthChec
 		Code:   &code,
 		URI:    uri,
 	}, nil
+}
+
+func svcPrivate(service *v1.Service) (bool, error) {
+	isPrivate, ok := service.Annotations[serviceAnnotationLoadBalancerPrivate]
+	if !ok {
+		return false, nil
+	}
+	return strconv.ParseBool(isPrivate)
 }
 
 // Original version: https://github.com/kubernetes/legacy-cloud-providers/blob/1aa918bf227e52af6f8feb3fa065dabff251a0a3/aws/aws_loadbalancer.go#L117
