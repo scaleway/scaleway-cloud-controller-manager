@@ -22,23 +22,11 @@ Currently `scaleway-cloud-controller-manager` currently implements:
    of `type: LoadBalancer` is created in Kubernetes.
  - Zone interface - makes Kubernetes aware of the failure domain of each node.
 
-## Compatibility matrix
+## Branches and releases
 
-|         | K8S 1.17 | K8S 1.18 | K8S 1.19 | K8S 1.20 |
-|---------|----------|----------|----------|----------|
-|  v0.1.x | ✓        | ~        | ~        | ~        |
-| v0.18.x | ~        | ✓        | ~        | ~        |
-| v0.19.x | ~        | ~        | ✓        | ~        |
-| v0.20.x | ~        | ~        | ~        | ✓        |
-
-- `✓` fully supported
-- `~` some features may not be supported (usually a Kubernetes version mismatch)
-
-### Branches and releases
-
-There is two types of branches:
-- `matser` which is the main branch
-- `release-x.y` which are the release branches. Each branch is built againt Kubernetes 1.y
+There are two types of branches:
+- `master` which is the main branch
+- `release-x.y` which are the release branches. Each branch is built against Kubernetes 1.y
 
 Most of the PRs on `master` will be backported to the supported `release-x.y` branches.
 
