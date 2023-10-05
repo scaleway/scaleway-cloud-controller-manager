@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/scaleway/scaleway-sdk-go/api/vpc/v2"
 	"github.com/scaleway/scaleway-sdk-go/logger"
 	"github.com/scaleway/scaleway-sdk-go/scw"
 	cloudprovider "k8s.io/cloud-provider"
@@ -52,6 +53,8 @@ const (
 	loadBalancerDefaultTypeEnv = "LB_DEFAULT_TYPE"
 
 	privateNetworkID = "PN_ID"
+
+	kopsClusterNameEnv = "KOPS_CLUSTER_NAME"
 )
 
 type cloud struct {
@@ -88,15 +91,32 @@ func newCloud(config io.Reader) (cloudprovider.Interface, error) {
 		return nil, err
 	}
 
-	if _, set := scwClient.GetDefaultRegion(); !set {
+	region, set := scwClient.GetDefaultRegion()
+	if !set {
 		return nil, errors.New("region is required")
 	}
 
 	client := newClient(scwClient)
 
-	instancesInterface := newServers(client, os.Getenv(privateNetworkID))
-	loadbalancerInterface := newLoadbalancers(client, os.Getenv(loadBalancerDefaultTypeEnv), os.Getenv(privateNetworkID))
-	zonesInterface := newZones(client, os.Getenv(privateNetworkID))
+	pnID := os.Getenv(privateNetworkID)
+
+	if kopsClusterName := os.Getenv(kopsClusterNameEnv); kopsClusterName != "" {
+		pnResponse, err := vpc.NewAPI(scwClient).ListPrivateNetworks(&vpc.ListPrivateNetworksRequest{
+			Region: region,
+			Name:   &kopsClusterName,
+		}, scw.WithAllPages())
+		if err != nil {
+			return nil, fmt.Errorf("listing private networks: %w", err)
+		}
+		if pnResponse.TotalCount != 1 {
+			return nil, fmt.Errorf("expected exactly 1 private network named %q, got %d", kopsClusterName, pnResponse.TotalCount)
+		}
+		pnID = pnResponse.PrivateNetworks[0].ID
+	}
+
+	instancesInterface := newServers(client, pnID)
+	loadbalancerInterface := newLoadbalancers(client, os.Getenv(loadBalancerDefaultTypeEnv), pnID)
+	zonesInterface := newZones(client, pnID)
 
 	for _, disableInterface := range strings.Split(os.Getenv(disableInterfacesEnv), ",") {
 		switch strings.ToLower(disableInterface) {
