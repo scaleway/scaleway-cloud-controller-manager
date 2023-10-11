@@ -28,7 +28,7 @@ It has the form `<zone>/<lb-id>`.
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-forward-port-algorithm`
 This is the annotation to choose the load balancing algorithm.
-The default value is `roundrobin` and the possible values are `roundrobin` or `leastconn`.
+The default value is `roundrobin` and the possible values are `roundrobin`, `leastconn` and `first`.
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-sticky-sessions`
 This is the annotation to enable cookie-based session persistence.
