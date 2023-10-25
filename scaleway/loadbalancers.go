@@ -1404,7 +1404,7 @@ func getForwardPortAlgorithm(service *v1.Service) (scwlb.ForwardPortAlgorithm, e
 
 	forwardPortAlgorithmValue := scwlb.ForwardPortAlgorithm(forwardPortAlgorithm)
 
-	if forwardPortAlgorithmValue != scwlb.ForwardPortAlgorithmRoundrobin && forwardPortAlgorithmValue != scwlb.ForwardPortAlgorithmLeastconn {
+	if forwardPortAlgorithmValue != scwlb.ForwardPortAlgorithmRoundrobin && forwardPortAlgorithmValue != scwlb.ForwardPortAlgorithmLeastconn && forwardPortAlgorithmValue != scwlb.ForwardPortAlgorithmFirst {
 		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerForwardPortAlgorithm)
 		return "", errLoadBalancerInvalidAnnotation
 	}
