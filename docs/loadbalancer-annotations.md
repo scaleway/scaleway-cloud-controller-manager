@@ -45,6 +45,10 @@ The default value is `tcp` and the possible values are `tcp`, `http`, `https`, `
 It is possible to set the type per port, like `80:http;443,8443:https`.
 NB: depending on the type, some other annotations are required, see below.
 
+### `service.beta.kubernetes.io/scw-loadbalancer-zone`
+This is the annotation to select the zone to create the load balancer in.  
+The default is the first zone of the cluster's region.
+
 ### `service.beta.kubernetes.io/scw-loadbalancer-health-check-delay`
 This is the annotation to set the time between two consecutive health checks.
 The default value is `5s`. The duration are go's time.Duration (ex: `1s`, `2m`, `4h`, ...).
@@ -85,6 +89,12 @@ NB: Required when setting service.beta.kubernetes.io/scw-loadbalancer-health-che
 This is the annotation to set the PgSQL user used to check the PgSQL connection when using the `pgsql` health check.
 It is possible to set the user per port, like `1234:root;3306,3307:mysql`.
 NB: Required when setting service.beta.kubernetes.io/scw-loadbalancer-health-check-type to `pgsql`.
+
+### `service.beta.kubernetes.io/scw-loadbalancer-send-proxy-v2`
+**This field is DEPRECATED**, use `service.beta.kubernetes.io/scw-loadbalancer-proxy-protocol-v2` instead.  
+This is the annotation that enables PROXY protocol version 2 (must be supported by backend servers)  
+The default value is "false" and the possible values are "false" or "true" or a comma delimited list of the service port
+on which to apply the proxy protocol (for instance "80,443").
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-proxy-protocol-v1`
 This is the annotation that can enable the PROXY protocol V1.
@@ -136,6 +146,10 @@ The possible format are:
  - `<certificate-id>`: will use this certificate for all frontends
  - `<certificate-id>,<certificate-id>` will use these certificates for all frontends
  - `<port1>:<certificate1-id>,<certificate2-id>;<port2>,<port3>:<certificate3-id>` will use certificate 1 and 2 for frontend with port port1 and certificate3 for frotend with port port2 and port3
+
+### `service.beta.kubernetes.io/scw-loadbalancer-target-node-labels`
+This is the annotation to target nodes with specific label(s).  
+Expected format: `"Key1=Val1,Key2=Val2"`
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-redispatch-attempt-count`
 This is the annotation to activate redispatch on another backend server in case of failure
