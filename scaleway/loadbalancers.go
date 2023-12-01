@@ -333,8 +333,6 @@ func (l *loadbalancers) EnsureLoadBalancer(ctx context.Context, clusterName stri
 		return nil, LoadBalancerNotReady
 	}
 
-	nodes = filterNodes(service, nodes)
-
 	err = l.updateLoadBalancer(ctx, lb, service, nodes)
 	if err != nil {
 		klog.Errorf("error updating loadbalancer for service %s/%s: %v", service.Namespace, service.Name, err)
@@ -614,6 +612,7 @@ func (l *loadbalancers) unannotateAndPatch(service *v1.Service) error {
 }
 
 func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *scwlb.LB, service *v1.Service, nodes []*v1.Node) error {
+	nodes = filterNodes(service, nodes)
 	if l.pnID != "" {
 		respPN, err := l.api.ListLBPrivateNetworks(&scwlb.ZonedAPIListLBPrivateNetworksRequest{
 			Zone: loadbalancer.Zone,
