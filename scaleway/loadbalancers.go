@@ -19,13 +19,14 @@ package scaleway
 import (
 	"context"
 	"fmt"
-	"math"
 	"net"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
 
+	"golang.org/x/exp/slices"
 	"google.golang.org/protobuf/types/known/durationpb"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
@@ -630,6 +631,7 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 			}
 
 			// this PN should not be attached to this loadbalancer
+			klog.V(3).Infof("detach extra private network %s from load balancer %s", pNIC.PrivateNetworkID, loadbalancer.ID)
 			err = l.api.DetachPrivateNetwork(&scwlb.ZonedAPIDetachPrivateNetworkRequest{
 				Zone:             loadbalancer.Zone,
 				LBID:             loadbalancer.ID,
@@ -641,6 +643,7 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 		}
 
 		if pnNIC == nil {
+			klog.V(3).Infof("attach private network %s to load balancer %s", l.pnID, loadbalancer.ID)
 			_, err = l.api.AttachPrivateNetwork(&scwlb.ZonedAPIAttachPrivateNetworkRequest{
 				Zone:             loadbalancer.Zone,
 				LBID:             loadbalancer.ID,
@@ -648,9 +651,18 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 				DHCPConfig:       &scwlb.PrivateNetworkDHCPConfig{},
 			})
 			if err != nil {
-				return fmt.Errorf("unable to attach private network on %s: %v", loadbalancer.ID, err)
+				return fmt.Errorf("unable to attach private network %s on %s: %v", l.pnID, loadbalancer.ID, err)
 			}
 		}
+	}
+
+	var targetIPs []string
+	if getForceInternalIP(service) || l.pnID != "" {
+		targetIPs = extractNodesInternalIps(nodes)
+		klog.V(3).Infof("using internal nodes ips: %s on loadbalancer %s", strings.Join(targetIPs, ","), loadbalancer.ID)
+	} else {
+		targetIPs = extractNodesExternalIps(nodes)
+		klog.V(3).Infof("using external nodes ips: %s on loadbalancer %s", strings.Join(targetIPs, ","), loadbalancer.ID)
 	}
 
 	// List all frontends associated with the LB
@@ -658,39 +670,8 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 		Zone: loadbalancer.Zone,
 		LBID: loadbalancer.ID,
 	}, scw.WithAllPages())
-
 	if err != nil {
 		return fmt.Errorf("error listing frontends for load balancer %s: %v", loadbalancer.ID, err)
-	}
-
-	frontends := respFrontends.Frontends
-
-	portFrontends := make(map[int32]*scwlb.Frontend)
-	for _, frontend := range frontends {
-		keep := false
-		for _, port := range service.Spec.Ports {
-			// if the frontend is still valid keep it
-			if port.Port == frontend.InboundPort && port.NodePort == frontend.Backend.ForwardPort {
-				keep = true
-				break
-			}
-		}
-
-		if !keep {
-			// if the frontend is not valid anymore, delete it
-			klog.Infof("deleting frontend: %s", frontend.ID)
-
-			err := l.api.DeleteFrontend(&scwlb.ZonedAPIDeleteFrontendRequest{
-				Zone:       loadbalancer.Zone,
-				FrontendID: frontend.ID,
-			})
-
-			if err != nil {
-				return fmt.Errorf("error deleting frontend %s: %v", frontend.ID, err)
-			}
-		} else {
-			portFrontends[frontend.InboundPort] = frontend
-		}
 	}
 
 	// List all backends associated with the LB
@@ -698,227 +679,142 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 		Zone: loadbalancer.Zone,
 		LBID: loadbalancer.ID,
 	}, scw.WithAllPages())
-
 	if err != nil {
 		return fmt.Errorf("error listing backend for load balancer %s: %v", loadbalancer.ID, err)
 	}
 
-	backends := respBackends.Backends
-
-	portBackends := make(map[int32]*scwlb.Backend)
-	for _, backend := range backends {
-		keep := false
-		for _, port := range service.Spec.Ports {
-			// if the backend is still valid, keep it
-			if port.NodePort == backend.ForwardPort {
-				keep = true
-				break
-			}
-		}
-
-		if !keep {
-			// if the backend is not valid, delete it
-			err := l.api.DeleteBackend(&scwlb.ZonedAPIDeleteBackendRequest{
-				Zone:      loadbalancer.Zone,
-				BackendID: backend.ID,
-			})
-
-			if err != nil {
-				return fmt.Errorf("error deleting backend %s: %v", backend.ID, err)
-			}
-		} else {
-			portBackends[backend.ForwardPort] = backend
-		}
+	svcFrontends, svcBackends, err := serviceToLB(service, loadbalancer, targetIPs)
+	if err != nil {
+		return fmt.Errorf("failed to convert service to frontend and backends on loadbalancer %s: %v", loadbalancer.ID, err)
 	}
 
-	// loop through all the service ports
-	for _, port := range service.Spec.Ports {
-		// if the corresponding backend exists for the node port, update it
-		if backend, ok := portBackends[port.NodePort]; ok {
-			updateBackendRequest, err := l.makeUpdateBackendRequest(backend, service, nodes)
-			if err != nil {
-				klog.Errorf("error making UpdateBackendRequest: %v", err)
-				return err
-			}
+	frontendsOps := compareFrontends(respFrontends.Frontends, svcFrontends)
+	backendsOps := compareBackends(respBackends.Backends, svcBackends)
 
-			updateBackendRequest.Zone = loadbalancer.Zone
-			updateBackendRequest.ForwardPort = port.NodePort
-			_, err = l.api.UpdateBackend(updateBackendRequest)
-			if err != nil {
-				klog.Errorf("error updating backend %s: %v", backend.ID, err)
-				return fmt.Errorf("error updating backend %s: %v", backend.ID, err)
-			}
-
-			updateHealthCheckRequest, err := l.makeUpdateHealthCheckRequest(backend, port.NodePort, service, nodes)
-			if err != nil {
-				klog.Errorf("error making UpdateHealthCheckRequest: %v", err)
-				return err
-			}
-
-			updateHealthCheckRequest.Zone = loadbalancer.Zone
-			_, err = l.api.UpdateHealthCheck(updateHealthCheckRequest)
-			if err != nil {
-				klog.Errorf("error updating healthcheck for backend %s: %v", backend.ID, err)
-				return fmt.Errorf("error updating healthcheck for backend %s: %v", backend.ID, err)
-			}
-
-			var serverIPs []string
-			if getForceInternalIP(service) || l.pnID != "" {
-				serverIPs = extractNodesInternalIps(nodes)
-			} else {
-				serverIPs = extractNodesExternalIps(nodes)
-			}
-
-			setBackendServersRequest := &scwlb.ZonedAPISetBackendServersRequest{
-				Zone:      loadbalancer.Zone,
-				BackendID: backend.ID,
-				ServerIP:  serverIPs,
-			}
-
-			respBackend, err := l.api.SetBackendServers(setBackendServersRequest)
-			if err != nil {
-				klog.Errorf("error setting backend servers for backend %s: %v", backend.ID, err)
-				return fmt.Errorf("error setting backend servers for backend %s: %v", backend.ID, err)
-			}
-
-			portBackends[backend.ForwardPort] = respBackend
-		} else { // if a backend does not exists for the node port, create it
-			request, err := l.makeCreateBackendRequest(loadbalancer, port.NodePort, service, nodes)
-			if err != nil {
-				klog.Errorf("error making CreateBackendRequest: %v", err)
-				return err
-			}
-
-			respBackend, err := l.api.CreateBackend(request)
-			if err != nil {
-				klog.Errorf("error creating backend on load balancer %s: %v", loadbalancer.ID, err)
-				return fmt.Errorf("error creating backend on load balancer %s: %v", loadbalancer.ID, err)
-			}
-
-			portBackends[port.NodePort] = respBackend
-		}
-	}
-
-	for _, port := range service.Spec.Ports {
-		var frontendID string
-		certificateIDs, err := getCertificateIDs(service, port.Port)
-		if err != nil {
-			return fmt.Errorf("error getting certificate IDs for loadbalancer %s: %v", loadbalancer.ID, err)
-		}
-
-		timeoutClient, err := getTimeoutClient(service)
-		if err != nil {
-			return fmt.Errorf("error getting %s annotation for loadbalancer %s: %v",
-				serviceAnnotationLoadBalancerTimeoutClient, loadbalancer.ID, err)
-		}
-
-		// if the frontend exists for the port, update it
-		if frontend, ok := portFrontends[port.Port]; ok {
-			_, err := l.api.UpdateFrontend(&scwlb.ZonedAPIUpdateFrontendRequest{
-				Zone:           loadbalancer.Zone,
-				FrontendID:     frontend.ID,
-				Name:           frontend.Name,
-				InboundPort:    frontend.InboundPort,
-				BackendID:      portBackends[port.NodePort].ID,
-				TimeoutClient:  &timeoutClient,
-				CertificateIDs: scw.StringsPtr(certificateIDs),
-			})
-
-			if err != nil {
-				klog.Errorf("error updating frontend %s: %v", frontend.ID, err)
-				return fmt.Errorf("error updating frontend %s: %v", frontend.ID, err)
-			}
-
-			frontendID = frontend.ID
-		} else { // if the frontend for this port does not exist, create it
-			resp, err := l.api.CreateFrontend(&scwlb.ZonedAPICreateFrontendRequest{
-				Zone:           loadbalancer.Zone,
-				LBID:           loadbalancer.ID,
-				Name:           fmt.Sprintf("%s_tcp_%d", string(service.UID), port.Port),
-				InboundPort:    port.Port,
-				BackendID:      portBackends[port.NodePort].ID,
-				TimeoutClient:  &timeoutClient,
-				CertificateIDs: scw.StringsPtr(certificateIDs),
-			})
-
-			if err != nil {
-				klog.Errorf("error creating frontend on load balancer %s: %v", loadbalancer.ID, err)
-				return fmt.Errorf("error creating frontend on load balancer %s: %v", loadbalancer.ID, err)
-			}
-
-			frontendID = resp.ID
-		}
-
-		aclName := frontendID + "-lb-source-range"
-
-		acls, err := l.api.ListACLs(&scwlb.ZonedAPIListACLsRequest{
+	// Remove extra frontends
+	for _, f := range frontendsOps.remove {
+		klog.V(3).Infof("deleting frontend: %s port: %d loadbalancer: %s", f.ID, f.InboundPort, loadbalancer.ID)
+		if err := l.api.DeleteFrontend(&scwlb.ZonedAPIDeleteFrontendRequest{
 			Zone:       loadbalancer.Zone,
-			FrontendID: frontendID,
+			FrontendID: f.ID,
+		}); err != nil {
+			return fmt.Errorf("failed deleting frontend: %s port: %d loadbalancer: %s err: %v", f.ID, f.InboundPort, loadbalancer.ID, err)
+		}
+	}
+
+	// Remove extra backends
+	for _, b := range backendsOps.remove {
+		klog.V(3).Infof("deleting backend: %s port: %d loadbalancer: %s", b.ID, b.ForwardPort, loadbalancer.ID)
+		if err := l.api.DeleteBackend(&scwlb.ZonedAPIDeleteBackendRequest{
+			Zone:      loadbalancer.Zone,
+			BackendID: b.ID,
+		}); err != nil {
+			return fmt.Errorf("failed deleting backend: %s port: %d loadbalancer: %s err: %v", b.ID, b.ForwardPort, loadbalancer.ID, err)
+		}
+	}
+
+	for _, port := range service.Spec.Ports {
+		var backend *scwlb.Backend
+		// Update backend
+		if b, ok := backendsOps.update[port.NodePort]; ok {
+			klog.V(3).Infof("update backend: %s port: %d loadbalancer: %s", b.ID, b.ForwardPort, loadbalancer.ID)
+			updatedBackend, err := l.updateBackend(service, loadbalancer, b)
+			if err != nil {
+				return fmt.Errorf("failed updating backend %s port: %d loadbalancer: %s err: %v", b.ID, b.ForwardPort, loadbalancer.ID, err)
+			}
+			backend = updatedBackend
+		}
+		// Create backend
+		if b, ok := backendsOps.create[port.NodePort]; ok {
+			klog.V(3).Infof("create backend port: %d loadbalancer: %s", b.ForwardPort, loadbalancer.ID)
+			createdBackend, err := l.createBackend(service, loadbalancer, b)
+			if err != nil {
+				return fmt.Errorf("failed creating backend port: %d loadbalancer: %s err: %v", b.ForwardPort, loadbalancer.ID, err)
+			}
+			backend = createdBackend
+		}
+
+		if backend == nil {
+			b, ok := backendsOps.keep[port.NodePort]
+			if !ok {
+				return fmt.Errorf("undefined backend port: %d loadbalancer: %s", port.NodePort, loadbalancer.ID)
+			}
+			backend = b
+		}
+
+		// Update backend servers
+		if !stringArrayEqual(backend.Pool, targetIPs) {
+			klog.V(3).Infof("update server list for backend: %s port: %d loadbalancer: %s", backend.ID, port.NodePort, loadbalancer.ID)
+			if _, err := l.api.SetBackendServers(&scwlb.ZonedAPISetBackendServersRequest{
+				Zone:      getLoadBalancerZone(service),
+				BackendID: backend.ID,
+				ServerIP:  targetIPs,
+			}); err != nil {
+				return fmt.Errorf("failed updating server list for backend: %s port: %d loadbalancer: %s err: %v", backend.ID, port.NodePort, loadbalancer.ID, err)
+			}
+		}
+
+		var frontend *scwlb.Frontend
+		// Update frontend
+		if f, ok := frontendsOps.update[port.Port]; ok {
+			klog.V(3).Infof("update frontend: %s port: %d loadbalancer: %s", f.ID, port.Port, loadbalancer.ID)
+			ff, err := l.updateFrontend(service, loadbalancer, f, backend)
+			if err != nil {
+				return fmt.Errorf("failed updating frontend: %s port: %d loadbalancer: %s err: %v", f.ID, port.Port, loadbalancer.ID, err)
+			}
+			frontend = ff
+		}
+		// Create frontend
+		if f, ok := frontendsOps.create[port.Port]; ok {
+			klog.V(3).Infof("create frontend port: %d loadbalancer: %s", port.Port, loadbalancer.ID)
+			ff, err := l.createFrontend(service, loadbalancer, f, backend)
+			if err != nil {
+				return fmt.Errorf("failed creating frontend port: %d loadbalancer: %s err: %v", port.Port, loadbalancer.ID, err)
+			}
+			frontend = ff
+		}
+
+		if frontend == nil {
+			f, ok := frontendsOps.keep[port.Port]
+			if !ok {
+				return fmt.Errorf("undefined frontend port: %d loadbalancer: %s", port.Port, loadbalancer.ID)
+			}
+			frontend = f
+		}
+
+		// List ACLs for the frontend
+		aclName := makeACLPrefix(frontend)
+		aclsResp, err := l.api.ListACLs(&scwlb.ZonedAPIListACLsRequest{
+			Zone:       loadbalancer.Zone,
+			FrontendID: frontend.ID,
 			Name:       &aclName,
 		}, scw.WithAllPages())
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to list ACLs for frontend: %s port: %d loadbalancer: %s err: %v", frontend.ID, frontend.InboundPort, loadbalancer.ID, err)
 		}
 
-		if len(service.Spec.LoadBalancerSourceRanges) == 0 || len(acls.ACLs) != 1 {
-			for _, acl := range acls.ACLs {
-				err = l.api.DeleteACL(&scwlb.ZonedAPIDeleteACLRequest{
-					Zone:  loadbalancer.Zone,
+		svcAcls := makeACLSpecs(service, nodes, frontend)
+		if !aclsEquals(aclsResp.ACLs, svcAcls) {
+			// Replace ACLs
+			klog.Infof("remove all ACLs from frontend: %s port: %d loadbalancer: %s", frontend.ID, frontend.InboundPort, loadbalancer.ID)
+			for _, acl := range aclsResp.ACLs {
+				if err := l.api.DeleteACL(&scwlb.ZonedAPIDeleteACLRequest{
+					Zone:  getLoadBalancerZone(service),
 					ACLID: acl.ID,
-				})
-				if err != nil {
-					return err
+				}); err != nil {
+					return fmt.Errorf("failed removing ACL %s from frontend: %s port: %d loadbalancer: %s err: %v", acl.Name, frontend.ID, frontend.InboundPort, loadbalancer.ID, err)
 				}
 			}
-		}
 
-		if len(service.Spec.LoadBalancerSourceRanges) != 0 {
-			aclIPs := extractNodesInternalIps(nodes)
-			aclIPs = append(aclIPs, extractNodesExternalIps(nodes)...)
-			aclIPs = append(aclIPs, service.Spec.LoadBalancerSourceRanges...)
-			aclIPsPtr := []*string{}
-			newAcls := []*scwlb.ACLSpec{}
-
-			// Loop through all addresses and make sure to split ACLs every MaxEntriesPerACL.
-			for i := range aclIPs {
-				if i != 0 && i%MaxEntriesPerACL == 0 {
-					aclIndex := int32((i / MaxEntriesPerACL) - 1)
-					newAcls = append(newAcls, &scwlb.ACLSpec{
-						Name: fmt.Sprintf("%v-%d", aclName, aclIndex),
-						Action: &scwlb.ACLAction{
-							Type: scwlb.ACLActionTypeAllow,
-						},
-						Index: aclIndex,
-						Match: &scwlb.ACLMatch{
-							IPSubnet: aclIPsPtr,
-						},
-					})
-
-					aclIPsPtr = []*string{}
+			klog.Infof("create all ACLs for frontend: %s port: %d loadbalancer: %s", frontend.ID, frontend.InboundPort, loadbalancer.ID)
+			for _, acl := range svcAcls {
+				if _, err := l.api.SetACLs(&scwlb.ZonedAPISetACLsRequest{
+					Zone:       getLoadBalancerZone(service),
+					FrontendID: frontend.ID,
+					ACLs:       svcAcls,
+				}); err != nil {
+					return fmt.Errorf("failed creating ACL %s for frontend: %s port: %d loadbalancer: %s err: %v", acl.Name, frontend.ID, frontend.InboundPort, loadbalancer.ID, err)
 				}
-				aclIPsPtr = append(aclIPsPtr, &aclIPs[i])
-			}
-
-			// Add last ACL with remaining addresses.
-			newAcls = append(newAcls, &scwlb.ACLSpec{
-				Name: aclName + "-end",
-				Action: &scwlb.ACLAction{
-					Type: scwlb.ACLActionTypeDeny,
-				},
-				Index: math.MaxInt32,
-				Match: &scwlb.ACLMatch{
-					IPSubnet: aclIPsPtr,
-					Invert:   true,
-				},
-			})
-
-			_, err := l.api.SetACLs(&scwlb.ZonedAPISetACLsRequest{
-				Zone:       loadbalancer.Zone,
-				FrontendID: frontendID,
-				ACLs:       newAcls,
-			})
-			if err != nil {
-				return err
 			}
 		}
 	}
@@ -937,352 +833,6 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 	}
 
 	return nil
-}
-
-func (l *loadbalancers) makeUpdateBackendRequest(backend *scwlb.Backend, service *v1.Service, nodes []*v1.Node) (*scwlb.ZonedAPIUpdateBackendRequest, error) {
-	protocol, err := getForwardProtocol(service, backend.ForwardPort)
-	if err != nil {
-		return nil, err
-	}
-
-	request := &scwlb.ZonedAPIUpdateBackendRequest{
-		BackendID:       backend.ID,
-		Name:            backend.Name,
-		ForwardProtocol: protocol,
-	}
-
-	forwardPortAlgorithm, err := getForwardPortAlgorithm(service)
-	if err != nil {
-		return nil, err
-	}
-	request.ForwardPortAlgorithm = forwardPortAlgorithm
-
-	stickySessions, err := getStickySessions(service)
-	if err != nil {
-		return nil, err
-	}
-
-	request.StickySessions = stickySessions
-
-	if stickySessions == scwlb.StickySessionsTypeCookie {
-		stickySessionsCookieName, err := getStickySessionsCookieName(service)
-		if err != nil {
-			return nil, err
-		}
-		if stickySessionsCookieName == "" {
-			klog.Errorf("missing annotation %s", serviceAnnotationLoadBalancerStickySessionsCookieName)
-			return nil, NewAnnorationError(serviceAnnotationLoadBalancerStickySessionsCookieName, stickySessionsCookieName)
-		}
-		request.StickySessionsCookieName = stickySessionsCookieName
-	}
-
-	proxyProtocol, err := getProxyProtocol(service, backend.ForwardPort)
-	if err != nil {
-		return nil, err
-	}
-	request.ProxyProtocol = proxyProtocol
-
-	timeoutServer, err := getTimeoutServer(service)
-	if err != nil {
-		return nil, err
-	}
-
-	request.TimeoutServer = &timeoutServer
-
-	timeoutConnect, err := getTimeoutConnect(service)
-	if err != nil {
-		return nil, err
-	}
-
-	request.TimeoutConnect = &timeoutConnect
-
-	timeoutTunnel, err := getTimeoutTunnel(service)
-	if err != nil {
-		return nil, err
-	}
-
-	request.TimeoutTunnel = &timeoutTunnel
-
-	onMarkedDownAction, err := getOnMarkedDownAction(service)
-	if err != nil {
-		return nil, err
-	}
-
-	request.OnMarkedDownAction = onMarkedDownAction
-
-	redispatchAttemptCount, err := getRedisatchAttemptCount(service)
-	if err != nil {
-		return nil, err
-	}
-
-	request.RedispatchAttemptCount = redispatchAttemptCount
-
-	maxRetries, err := getMaxRetries(service)
-	if err != nil {
-		return nil, err
-	}
-
-	request.MaxRetries = maxRetries
-
-	return request, nil
-}
-
-func (l *loadbalancers) makeUpdateHealthCheckRequest(backend *scwlb.Backend, nodePort int32, service *v1.Service, nodes []*v1.Node) (*scwlb.ZonedAPIUpdateHealthCheckRequest, error) {
-	request := &scwlb.ZonedAPIUpdateHealthCheckRequest{
-		BackendID: backend.ID,
-		Port:      nodePort,
-	}
-
-	healthCheckDelay, err := getHealthCheckDelay(service)
-	if err != nil {
-		return nil, err
-	}
-
-	request.CheckDelay = &healthCheckDelay
-
-	healthCheckTimeout, err := getHealthCheckTimeout(service)
-	if err != nil {
-		return nil, err
-	}
-
-	request.CheckTimeout = &healthCheckTimeout
-
-	healthCheckMaxRetries, err := getHealthCheckMaxRetries(service)
-	if err != nil {
-		return nil, err
-	}
-
-	request.CheckMaxRetries = healthCheckMaxRetries
-
-	transientCheckDelay, err := getHealthCheckTransientCheckDelay(service)
-	if err != nil {
-		return nil, err
-	}
-
-	request.TransientCheckDelay = transientCheckDelay
-
-	healthCheckType, err := getHealthCheckType(service, nodePort)
-	if err != nil {
-		return nil, err
-	}
-
-	switch healthCheckType {
-	case "mysql":
-		hc, err := getMysqlHealthCheck(service, nodePort)
-		if err != nil {
-			return nil, err
-		}
-		request.MysqlConfig = hc
-	case "ldap":
-		hc, err := getLdapHealthCheck(service, nodePort)
-		if err != nil {
-			return nil, err
-		}
-		request.LdapConfig = hc
-	case "redis":
-		hc, err := getRedisHealthCheck(service, nodePort)
-		if err != nil {
-			return nil, err
-		}
-		request.RedisConfig = hc
-	case "pgsql":
-		hc, err := getPgsqlHealthCheck(service, nodePort)
-		if err != nil {
-			return nil, err
-		}
-		request.PgsqlConfig = hc
-	case "tcp":
-		hc, err := getTCPHealthCheck(service, nodePort)
-		if err != nil {
-			return nil, err
-		}
-		request.TCPConfig = hc
-	case "http":
-		hc, err := getHTTPHealthCheck(service, nodePort)
-		if err != nil {
-			return nil, err
-		}
-		request.HTTPConfig = hc
-	case "https":
-		hc, err := getHTTPSHealthCheck(service, nodePort)
-		if err != nil {
-			return nil, err
-		}
-		request.HTTPSConfig = hc
-	default:
-		klog.Errorf("wrong value for healthCheckType")
-		return nil, NewAnnorationError(serviceAnnotationLoadBalancerHealthCheckType, healthCheckType)
-	}
-
-	return request, nil
-}
-
-func (l *loadbalancers) makeCreateBackendRequest(loadbalancer *scwlb.LB, nodePort int32, service *v1.Service, nodes []*v1.Node) (*scwlb.ZonedAPICreateBackendRequest, error) {
-	protocol, err := getForwardProtocol(service, nodePort)
-	if err != nil {
-		return nil, err
-	}
-	var serverIPs []string
-	if getForceInternalIP(service) || l.pnID != "" {
-		serverIPs = extractNodesInternalIps(nodes)
-	} else {
-		serverIPs = extractNodesExternalIps(nodes)
-	}
-	request := &scwlb.ZonedAPICreateBackendRequest{
-		Zone:            loadbalancer.Zone,
-		LBID:            loadbalancer.ID,
-		Name:            fmt.Sprintf("%s_tcp_%d", string(service.UID), nodePort),
-		ServerIP:        serverIPs,
-		ForwardProtocol: protocol,
-		ForwardPort:     nodePort,
-	}
-
-	forwardPortAlgorithm, err := getForwardPortAlgorithm(service)
-	if err != nil {
-		return nil, err
-	}
-	request.ForwardPortAlgorithm = forwardPortAlgorithm
-
-	stickySessions, err := getStickySessions(service)
-	if err != nil {
-		return nil, err
-	}
-
-	request.StickySessions = stickySessions
-
-	if stickySessions == scwlb.StickySessionsTypeCookie {
-		stickySessionsCookieName, err := getStickySessionsCookieName(service)
-		if err != nil {
-			return nil, err
-		}
-		if stickySessionsCookieName == "" {
-			klog.Errorf("missing annotation %s", serviceAnnotationLoadBalancerStickySessionsCookieName)
-			return nil, NewAnnorationError(serviceAnnotationLoadBalancerStickySessionsCookieName, stickySessionsCookieName)
-		}
-		request.StickySessionsCookieName = stickySessionsCookieName
-	}
-
-	proxyProtocol, err := getProxyProtocol(service, nodePort)
-	if err != nil {
-		return nil, err
-	}
-	request.ProxyProtocol = proxyProtocol
-
-	timeoutServer, err := getTimeoutServer(service)
-	if err != nil {
-		return nil, err
-	}
-
-	request.TimeoutServer = &timeoutServer
-
-	timeoutConnect, err := getTimeoutConnect(service)
-	if err != nil {
-		return nil, err
-	}
-
-	request.TimeoutConnect = &timeoutConnect
-
-	timeoutTunnel, err := getTimeoutTunnel(service)
-	if err != nil {
-		return nil, err
-	}
-
-	request.TimeoutTunnel = &timeoutTunnel
-
-	onMarkedDownAction, err := getOnMarkedDownAction(service)
-	if err != nil {
-		return nil, err
-	}
-
-	request.OnMarkedDownAction = onMarkedDownAction
-
-	healthCheck := &scwlb.HealthCheck{
-		Port: nodePort,
-	}
-
-	healthCheckDelay, err := getHealthCheckDelay(service)
-	if err != nil {
-		return nil, err
-	}
-
-	healthCheck.CheckDelay = &healthCheckDelay
-
-	healthCheckTimeout, err := getHealthCheckTimeout(service)
-	if err != nil {
-		return nil, err
-	}
-
-	healthCheck.CheckTimeout = &healthCheckTimeout
-
-	healthCheckMaxRetries, err := getHealthCheckMaxRetries(service)
-	if err != nil {
-		return nil, err
-	}
-
-	healthCheckTransientCheckDelay, err := getHealthCheckTransientCheckDelay(service)
-	if err != nil {
-		return nil, err
-	}
-	healthCheck.TransientCheckDelay = healthCheckTransientCheckDelay
-
-	healthCheck.CheckMaxRetries = healthCheckMaxRetries
-
-	healthCheckType, err := getHealthCheckType(service, nodePort)
-	if err != nil {
-		return nil, err
-	}
-
-	switch healthCheckType {
-	case "mysql":
-		hc, err := getMysqlHealthCheck(service, nodePort)
-		if err != nil {
-			return nil, err
-		}
-		healthCheck.MysqlConfig = hc
-	case "ldap":
-		hc, err := getLdapHealthCheck(service, nodePort)
-		if err != nil {
-			return nil, err
-		}
-		healthCheck.LdapConfig = hc
-	case "redis":
-		hc, err := getRedisHealthCheck(service, nodePort)
-		if err != nil {
-			return nil, err
-		}
-		healthCheck.RedisConfig = hc
-	case "pgsql":
-		hc, err := getPgsqlHealthCheck(service, nodePort)
-		if err != nil {
-			return nil, err
-		}
-		healthCheck.PgsqlConfig = hc
-	case "tcp":
-		hc, err := getTCPHealthCheck(service, nodePort)
-		if err != nil {
-			return nil, err
-		}
-		healthCheck.TCPConfig = hc
-	case "http":
-		hc, err := getHTTPHealthCheck(service, nodePort)
-		if err != nil {
-			return nil, err
-		}
-		healthCheck.HTTPConfig = hc
-	case "https":
-		hc, err := getHTTPSHealthCheck(service, nodePort)
-		if err != nil {
-			return nil, err
-		}
-		healthCheck.HTTPSConfig = hc
-	default:
-		klog.Errorf("wrong value for healthCheckType")
-		return nil, errLoadBalancerInvalidAnnotation
-	}
-
-	request.HealthCheck = healthCheck
-
-	return request, nil
 }
 
 // createPrivateServiceStatus creates a LoadBalancer status for services with private load balancers
@@ -1628,7 +1178,8 @@ func getOnMarkedDownAction(service *v1.Service) (scwlb.OnMarkedDownAction, error
 func getRedisatchAttemptCount(service *v1.Service) (*int32, error) {
 	redispatchAttemptCount, ok := service.Annotations[serviceAnnotationLoadBalancerRedispatchAttemptCount]
 	if !ok {
-		return nil, nil
+		var v int32 = 0
+		return &v, nil
 	}
 	redispatchAttemptCountInt, err := strconv.Atoi(redispatchAttemptCount)
 	if err != nil {
@@ -1643,7 +1194,8 @@ func getRedisatchAttemptCount(service *v1.Service) (*int32, error) {
 func getMaxRetries(service *v1.Service) (*int32, error) {
 	maxRetriesCount, ok := service.Annotations[serviceAnnotationLoadBalancerMaxRetries]
 	if !ok {
-		return nil, nil
+		var v int32 = 3
+		return &v, nil
 	}
 	maxRetriesCountInt, err := strconv.Atoi(maxRetriesCount)
 	if err != nil {
@@ -1772,11 +1324,10 @@ func getForwardProtocol(service *v1.Service, nodePort int32) (scwlb.Protocol, er
 
 func getCertificateIDs(service *v1.Service, port int32) ([]string, error) {
 	certificates := service.Annotations[serviceAnnotationLoadBalancerCertificateIDs]
-	if certificates == "" {
-		return nil, nil
-	}
-
 	ids := []string{}
+	if certificates == "" {
+		return ids, nil
+	}
 
 	for _, perPortCertificate := range strings.Split(certificates, ";") {
 		split := strings.Split(perPortCertificate, ":")
@@ -2062,4 +1613,702 @@ func filterNodes(service *v1.Service, nodes []*v1.Node) []*v1.Node {
 	}
 
 	return targetNodes
+}
+
+func servicePortToFrontend(service *v1.Service, loadbalancer *scwlb.LB, port v1.ServicePort) (*scwlb.Frontend, error) {
+	timeoutClient, err := getTimeoutClient(service)
+	if err != nil {
+		return nil, fmt.Errorf("error getting %s annotation for loadbalancer %s: %v",
+			serviceAnnotationLoadBalancerTimeoutClient, loadbalancer.ID, err)
+	}
+
+	certificateIDs, err := getCertificateIDs(service, port.Port)
+	if err != nil {
+		return nil, fmt.Errorf("error getting certificate IDs for loadbalancer %s: %v", loadbalancer.ID, err)
+	}
+
+	return &scwlb.Frontend{
+		Name:           fmt.Sprintf("%s_tcp_%d", string(service.UID), port.Port),
+		InboundPort:    port.Port,
+		TimeoutClient:  &timeoutClient,
+		CertificateIDs: certificateIDs,
+	}, nil
+}
+
+func servicePortToBackend(service *v1.Service, loadbalancer *scwlb.LB, port v1.ServicePort, nodeIPs []string) (*scwlb.Backend, error) {
+	protocol, err := getForwardProtocol(service, port.NodePort)
+	if err != nil {
+		return nil, err
+	}
+
+	forwardPortAlgorithm, err := getForwardPortAlgorithm(service)
+	if err != nil {
+		return nil, err
+	}
+
+	stickySessions, err := getStickySessions(service)
+	if err != nil {
+		return nil, err
+	}
+
+	proxyProtocol, err := getProxyProtocol(service, port.NodePort)
+	if err != nil {
+		return nil, err
+	}
+
+	timeoutServer, err := getTimeoutServer(service)
+	if err != nil {
+		return nil, err
+	}
+
+	timeoutConnect, err := getTimeoutConnect(service)
+	if err != nil {
+		return nil, err
+	}
+
+	timeoutTunnel, err := getTimeoutTunnel(service)
+	if err != nil {
+		return nil, err
+	}
+
+	onMarkedDownAction, err := getOnMarkedDownAction(service)
+	if err != nil {
+		return nil, err
+	}
+
+	redispatchAttemptCount, err := getRedisatchAttemptCount(service)
+	if err != nil {
+		return nil, err
+	}
+
+	maxRetries, err := getMaxRetries(service)
+	if err != nil {
+		return nil, err
+	}
+
+	healthCheck := &scwlb.HealthCheck{
+		Port: port.NodePort,
+	}
+
+	healthCheckDelay, err := getHealthCheckDelay(service)
+	if err != nil {
+		return nil, err
+	}
+	healthCheck.CheckDelay = &healthCheckDelay
+
+	healthCheckTimeout, err := getHealthCheckTimeout(service)
+	if err != nil {
+		return nil, err
+	}
+	healthCheck.CheckTimeout = &healthCheckTimeout
+
+	healthCheckMaxRetries, err := getHealthCheckMaxRetries(service)
+	if err != nil {
+		return nil, err
+	}
+	healthCheck.CheckMaxRetries = healthCheckMaxRetries
+
+	healthCheckTransientCheckDelay, err := getHealthCheckTransientCheckDelay(service)
+	if err != nil {
+		return nil, err
+	}
+	healthCheck.TransientCheckDelay = healthCheckTransientCheckDelay
+
+	healthCheckType, err := getHealthCheckType(service, port.NodePort)
+	if err != nil {
+		return nil, err
+	}
+
+	switch healthCheckType {
+	case "mysql":
+		hc, err := getMysqlHealthCheck(service, port.NodePort)
+		if err != nil {
+			return nil, err
+		}
+		healthCheck.MysqlConfig = hc
+	case "ldap":
+		hc, err := getLdapHealthCheck(service, port.NodePort)
+		if err != nil {
+			return nil, err
+		}
+		healthCheck.LdapConfig = hc
+	case "redis":
+		hc, err := getRedisHealthCheck(service, port.NodePort)
+		if err != nil {
+			return nil, err
+		}
+		healthCheck.RedisConfig = hc
+	case "pgsql":
+		hc, err := getPgsqlHealthCheck(service, port.NodePort)
+		if err != nil {
+			return nil, err
+		}
+		healthCheck.PgsqlConfig = hc
+	case "tcp":
+		hc, err := getTCPHealthCheck(service, port.NodePort)
+		if err != nil {
+			return nil, err
+		}
+		healthCheck.TCPConfig = hc
+	case "http":
+		hc, err := getHTTPHealthCheck(service, port.NodePort)
+		if err != nil {
+			return nil, err
+		}
+		healthCheck.HTTPConfig = hc
+	case "https":
+		hc, err := getHTTPSHealthCheck(service, port.NodePort)
+		if err != nil {
+			return nil, err
+		}
+		healthCheck.HTTPSConfig = hc
+	default:
+		klog.Errorf("wrong value for healthCheckType")
+		return nil, errLoadBalancerInvalidAnnotation
+	}
+
+	backend := &scwlb.Backend{
+		Name:                   fmt.Sprintf("%s_tcp_%d", string(service.UID), port.NodePort),
+		Pool:                   nodeIPs,
+		ForwardPort:            port.NodePort,
+		ForwardProtocol:        protocol,
+		ForwardPortAlgorithm:   forwardPortAlgorithm,
+		StickySessions:         stickySessions,
+		ProxyProtocol:          proxyProtocol,
+		TimeoutServer:          &timeoutServer,
+		TimeoutConnect:         &timeoutConnect,
+		TimeoutTunnel:          &timeoutTunnel,
+		OnMarkedDownAction:     onMarkedDownAction,
+		HealthCheck:            healthCheck,
+		RedispatchAttemptCount: redispatchAttemptCount,
+		MaxRetries:             maxRetries,
+	}
+
+	if stickySessions == scwlb.StickySessionsTypeCookie {
+		stickySessionsCookieName, err := getStickySessionsCookieName(service)
+		if err != nil {
+			return nil, err
+		}
+		if stickySessionsCookieName == "" {
+			klog.Errorf("missing annotation %s", serviceAnnotationLoadBalancerStickySessionsCookieName)
+			return nil, NewAnnorationError(serviceAnnotationLoadBalancerStickySessionsCookieName, stickySessionsCookieName)
+		}
+		backend.StickySessionsCookieName = stickySessionsCookieName
+	}
+
+	return backend, nil
+}
+
+func serviceToLB(service *v1.Service, loadbalancer *scwlb.LB, nodeIPs []string) (map[int32]*scwlb.Frontend, map[int32]*scwlb.Backend, error) {
+	frontends := map[int32]*scwlb.Frontend{}
+	backends := map[int32]*scwlb.Backend{}
+
+	for _, port := range service.Spec.Ports {
+		frontend, err := servicePortToFrontend(service, loadbalancer, port)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to prepare frontend for port %d: %v", port.Port, err)
+		}
+
+		backend, err := servicePortToBackend(service, loadbalancer, port, nodeIPs)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to prepare backend for port %d: %v", port.Port, err)
+		}
+
+		frontends[port.Port] = frontend
+		backends[port.NodePort] = backend
+	}
+
+	return frontends, backends, nil
+}
+
+func frontendEquals(got, want *scwlb.Frontend) bool {
+	if got == nil || want == nil {
+		return got == want
+	}
+
+	if got.Name != want.Name {
+		klog.V(3).Infof("frontend.Name: %s - %s", got.Name, want.Name)
+		return false
+	}
+	if got.InboundPort != want.InboundPort {
+		klog.V(3).Infof("frontend.InboundPort: %s - %s", got.InboundPort, want.InboundPort)
+		return false
+	}
+	if !durationPtrEqual(got.TimeoutClient, want.TimeoutClient) {
+		klog.V(3).Infof("frontend.TimeoutClient: %s - %s", got.TimeoutClient, want.TimeoutClient)
+		return false
+	}
+
+	if !stringArrayEqual(got.CertificateIDs, want.CertificateIDs) {
+		klog.V(3).Infof("frontend.CertificateIDs: %s - %s", got.CertificateIDs, want.CertificateIDs)
+		return false
+	}
+
+	return true
+}
+
+func backendEquals(got, want *scwlb.Backend) bool {
+	if got == nil || want == nil {
+		return got == want
+	}
+
+	if got.Name != want.Name {
+		klog.V(3).Infof("backend.Name: %s - %s", got.Name, want.Name)
+		return false
+	}
+	if got.ForwardPort != want.ForwardPort {
+		klog.V(3).Infof("backend.ForwardPort: %s - %s", got.ForwardPort, want.ForwardPort)
+		return false
+	}
+	if got.ForwardProtocol != want.ForwardProtocol {
+		klog.V(3).Infof("backend.ForwardProtocol: %s - %s", got.ForwardProtocol, want.ForwardProtocol)
+		return false
+	}
+	if got.ForwardPortAlgorithm != want.ForwardPortAlgorithm {
+		klog.V(3).Infof("backend.ForwardPortAlgorithm: %s - %s", got.ForwardPortAlgorithm, want.ForwardPortAlgorithm)
+		return false
+	}
+	if got.StickySessions != want.StickySessions {
+		klog.V(3).Infof("backend.StickySessions: %s - %s", got.StickySessions, want.StickySessions)
+		return false
+	}
+	if got.ProxyProtocol != want.ProxyProtocol {
+		klog.V(3).Infof("backend.ProxyProtocol: %s - %s", got.ProxyProtocol, want.ProxyProtocol)
+		return false
+	}
+	if !durationPtrEqual(got.TimeoutServer, want.TimeoutServer) {
+		klog.V(3).Infof("backend.TimeoutServer: %s - %s", got.TimeoutServer, want.TimeoutServer)
+		return false
+	}
+	if !durationPtrEqual(got.TimeoutConnect, want.TimeoutConnect) {
+		klog.V(3).Infof("backend.TimeoutConnect: %s - %s", got.TimeoutConnect, want.TimeoutConnect)
+		return false
+	}
+	if !durationPtrEqual(got.TimeoutTunnel, want.TimeoutTunnel) {
+		klog.V(3).Infof("backend.TimeoutTunnel: %s - %s", got.TimeoutTunnel, want.TimeoutTunnel)
+		return false
+	}
+	if got.OnMarkedDownAction != want.OnMarkedDownAction {
+		klog.V(3).Infof("backend.OnMarkedDownAction: %s - %s", got.OnMarkedDownAction, want.OnMarkedDownAction)
+		return false
+	}
+	if !int32PtrEqual(got.RedispatchAttemptCount, want.RedispatchAttemptCount) {
+		klog.V(3).Infof("backend.RedispatchAttemptCount: %s - %s", got.RedispatchAttemptCount, want.RedispatchAttemptCount)
+		return false
+	}
+	if !int32PtrEqual(got.MaxRetries, want.MaxRetries) {
+		klog.V(3).Infof("backend.MaxRetries: %s - %s", got.MaxRetries, want.MaxRetries)
+		return false
+	}
+	if got.StickySessionsCookieName != want.StickySessionsCookieName {
+		klog.V(3).Infof("backend.StickySessionsCookieName: %s - %s", got.StickySessionsCookieName, want.StickySessionsCookieName)
+		return false
+	}
+
+	// TODO
+	if got.HealthCheck != want.HealthCheck {
+		if got.HealthCheck == nil || want.HealthCheck == nil {
+			klog.V(3).Infof("backend.HealthCheck: %s - %s", got.HealthCheck, want.HealthCheck)
+			return false
+		}
+
+		if got.HealthCheck.Port != want.HealthCheck.Port {
+			klog.V(3).Infof("backend.HealthCheck.Port: %s - %s", got.HealthCheck.Port, want.HealthCheck.Port)
+			return false
+		}
+		if !durationPtrEqual(got.HealthCheck.CheckDelay, want.HealthCheck.CheckDelay) {
+			klog.V(3).Infof("backend.HealthCheck.CheckDelay: %s - %s", got.HealthCheck.CheckDelay, want.HealthCheck.CheckDelay)
+			return false
+		}
+		if !durationPtrEqual(got.HealthCheck.CheckTimeout, want.HealthCheck.CheckTimeout) {
+			klog.V(3).Infof("backend.HealthCheck.CheckTimeout: %s - %s", got.HealthCheck.CheckTimeout, want.HealthCheck.CheckTimeout)
+			return false
+		}
+		if got.HealthCheck.CheckMaxRetries != want.HealthCheck.CheckMaxRetries {
+			klog.V(3).Infof("backend.HealthCheck.CheckMaxRetries: %s - %s", got.HealthCheck.CheckMaxRetries, want.HealthCheck.CheckMaxRetries)
+			return false
+		}
+		if got.HealthCheck.CheckSendProxy != want.HealthCheck.CheckSendProxy {
+			klog.V(3).Infof("backend.HealthCheck.CheckSendProxy: %s - %s", got.HealthCheck.CheckSendProxy, want.HealthCheck.CheckSendProxy)
+			return false
+		}
+		if (got.HealthCheck.TCPConfig == nil) != (want.HealthCheck.TCPConfig == nil) {
+			klog.V(3).Infof("backend.HealthCheck.TCPConfig: %s - %s", got.HealthCheck.TCPConfig, want.HealthCheck.TCPConfig)
+			return false
+		}
+		if (got.HealthCheck.MysqlConfig == nil) != (want.HealthCheck.MysqlConfig == nil) {
+			klog.V(3).Infof("backend.HealthCheck.MysqlConfig: %s - %s", got.HealthCheck.MysqlConfig, want.HealthCheck.MysqlConfig)
+			return false
+		}
+		if (got.HealthCheck.PgsqlConfig == nil) != (want.HealthCheck.PgsqlConfig == nil) {
+			klog.V(3).Infof("backend.HealthCheck.PgsqlConfig: %s - %s", got.HealthCheck.PgsqlConfig, want.HealthCheck.PgsqlConfig)
+			return false
+		}
+		if (got.HealthCheck.LdapConfig == nil) != (want.HealthCheck.LdapConfig == nil) {
+			klog.V(3).Infof("backend.HealthCheck.LdapConfig: %s - %s", got.HealthCheck.LdapConfig, want.HealthCheck.LdapConfig)
+			return false
+		}
+		if (got.HealthCheck.RedisConfig == nil) != (want.HealthCheck.RedisConfig == nil) {
+			klog.V(3).Infof("backend.HealthCheck.RedisConfig: %s - %s", got.HealthCheck.RedisConfig, want.HealthCheck.RedisConfig)
+			return false
+		}
+		if (got.HealthCheck.HTTPConfig == nil) != (want.HealthCheck.HTTPConfig == nil) {
+			klog.V(3).Infof("backend.HealthCheck.HTTPConfig: %s - %s", got.HealthCheck.HTTPConfig, want.HealthCheck.HTTPConfig)
+			return false
+		}
+		if (got.HealthCheck.HTTPSConfig == nil) != (want.HealthCheck.HTTPSConfig == nil) {
+			klog.V(3).Infof("backend.HealthCheck.HTTPSConfig: %s - %s", got.HealthCheck.HTTPSConfig, want.HealthCheck.HTTPSConfig)
+			return false
+		}
+		if !scwDurationPtrEqual(got.HealthCheck.TransientCheckDelay, want.HealthCheck.TransientCheckDelay) {
+			klog.V(3).Infof("backend.HealthCheck.TransientCheckDelay: %s - %s", got.HealthCheck.TransientCheckDelay, want.HealthCheck.TransientCheckDelay)
+			return false
+		}
+	}
+
+	return true
+}
+
+type frontendOps struct {
+	remove map[int32]*scwlb.Frontend
+	update map[int32]*scwlb.Frontend
+	create map[int32]*scwlb.Frontend
+	keep   map[int32]*scwlb.Frontend
+}
+
+func compareFrontends(got []*scwlb.Frontend, want map[int32]*scwlb.Frontend) frontendOps {
+	remove := make(map[int32]*scwlb.Frontend)
+	update := make(map[int32]*scwlb.Frontend)
+	create := make(map[int32]*scwlb.Frontend)
+	keep := make(map[int32]*scwlb.Frontend)
+
+	// Check for deletions and updates
+	for _, current := range got {
+		if target, ok := want[current.InboundPort]; ok {
+			if !frontendEquals(current, target) {
+				target.ID = current.ID
+				update[target.InboundPort] = target
+			} else {
+				keep[target.InboundPort] = current
+			}
+		} else {
+			remove[target.InboundPort] = current
+		}
+	}
+
+	// Check for additions
+	for _, target := range want {
+		found := false
+		for _, current := range got {
+			if current.InboundPort == target.InboundPort {
+				found = true
+				break
+			}
+		}
+		if !found {
+			create[target.InboundPort] = target
+		}
+	}
+
+	return frontendOps{
+		remove: remove,
+		update: update,
+		create: create,
+		keep:   keep,
+	}
+}
+
+type backendOps struct {
+	remove map[int32]*scwlb.Backend
+	update map[int32]*scwlb.Backend
+	create map[int32]*scwlb.Backend
+	keep   map[int32]*scwlb.Backend
+}
+
+func compareBackends(got []*scwlb.Backend, want map[int32]*scwlb.Backend) backendOps {
+	remove := make(map[int32]*scwlb.Backend)
+	update := make(map[int32]*scwlb.Backend)
+	create := make(map[int32]*scwlb.Backend)
+	keep := make(map[int32]*scwlb.Backend)
+
+	// Check for deletions and updates
+	for _, current := range got {
+		if target, ok := want[current.ForwardPort]; ok {
+			if !backendEquals(current, target) {
+				target.ID = current.ID
+				update[target.ForwardPort] = target
+			} else {
+				keep[target.ForwardPort] = current
+			}
+		} else {
+			remove[target.ForwardPort] = current
+		}
+	}
+
+	// Check for additions
+	for _, target := range want {
+		found := false
+		for _, current := range got {
+			if current.ForwardPort == target.ForwardPort {
+				found = true
+				break
+			}
+		}
+		if !found {
+			create[target.ForwardPort] = target
+		}
+	}
+
+	return backendOps{
+		remove: remove,
+		update: update,
+		create: create,
+		keep:   keep,
+	}
+}
+
+func aclsEquals(got []*scwlb.ACL, want []*scwlb.ACLSpec) bool {
+	if len(got) != len(want) {
+		return false
+	}
+
+	slices.SortStableFunc(got, func(a, b *scwlb.ACL) bool { return a.Index < b.Index })
+	slices.SortStableFunc(want, func(a, b *scwlb.ACLSpec) bool { return a.Index < b.Index })
+	for idx, _ := range want {
+		if want[idx].Name != got[idx].Name {
+			return false
+		}
+		if want[idx].Index != got[idx].Index {
+			return false
+		}
+		if (want[idx].Action == nil) != (got[idx].Action == nil) {
+			return false
+		}
+		if want[idx].Action != nil && want[idx].Action.Type != got[idx].Action.Type {
+			return false
+		}
+		if (want[idx].Match == nil) != (got[idx].Match == nil) {
+			return false
+		}
+		if want[idx].Match != nil && !stringPtrArrayEqual(want[idx].Match.IPSubnet, got[idx].Match.IPSubnet) {
+			return false
+		}
+		if want[idx].Match != nil && want[idx].Match.Invert != got[idx].Match.Invert {
+			return false
+		}
+	}
+
+	return true
+}
+
+func (l *loadbalancers) createBackend(service *v1.Service, loadbalancer *scwlb.LB, backend *scwlb.Backend) (*scwlb.Backend, error) {
+	// TODO: implement createBackend
+	b, err := l.api.CreateBackend(&scwlb.ZonedAPICreateBackendRequest{
+		Zone:                     getLoadBalancerZone(service),
+		LBID:                     loadbalancer.ID,
+		Name:                     backend.Name,
+		ForwardProtocol:          backend.ForwardProtocol,
+		ForwardPort:              backend.ForwardPort,
+		ForwardPortAlgorithm:     backend.ForwardPortAlgorithm,
+		StickySessions:           backend.StickySessions,
+		StickySessionsCookieName: backend.StickySessionsCookieName,
+		HealthCheck:              backend.HealthCheck,
+		ServerIP:                 backend.Pool,
+		TimeoutServer:            backend.TimeoutServer,
+		TimeoutConnect:           backend.TimeoutConnect,
+		TimeoutTunnel:            backend.TimeoutTunnel,
+		OnMarkedDownAction:       backend.OnMarkedDownAction,
+		ProxyProtocol:            backend.ProxyProtocol,
+		RedispatchAttemptCount:   backend.RedispatchAttemptCount,
+		MaxRetries:               backend.MaxRetries,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return b, nil
+}
+
+func (l *loadbalancers) updateBackend(service *v1.Service, loadbalancer *scwlb.LB, backend *scwlb.Backend) (*scwlb.Backend, error) {
+	// TODO: implement updateBackend
+	b, err := l.api.UpdateBackend(&scwlb.ZonedAPIUpdateBackendRequest{
+		Zone:                     getLoadBalancerZone(service),
+		BackendID:                backend.ID,
+		Name:                     backend.Name,
+		ForwardProtocol:          backend.ForwardProtocol,
+		ForwardPort:              backend.ForwardPort,
+		ForwardPortAlgorithm:     backend.ForwardPortAlgorithm,
+		StickySessions:           backend.StickySessions,
+		StickySessionsCookieName: backend.StickySessionsCookieName,
+		TimeoutServer:            backend.TimeoutServer,
+		TimeoutConnect:           backend.TimeoutConnect,
+		TimeoutTunnel:            backend.TimeoutTunnel,
+		OnMarkedDownAction:       backend.OnMarkedDownAction,
+		ProxyProtocol:            backend.ProxyProtocol,
+		RedispatchAttemptCount:   backend.RedispatchAttemptCount,
+		MaxRetries:               backend.MaxRetries,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := l.api.UpdateHealthCheck(&scwlb.ZonedAPIUpdateHealthCheckRequest{
+		Zone:                getLoadBalancerZone(service),
+		BackendID:           backend.ID,
+		Port:                backend.ForwardPort,
+		CheckDelay:          backend.HealthCheck.CheckDelay,
+		CheckTimeout:        backend.HealthCheck.CheckTimeout,
+		CheckMaxRetries:     backend.HealthCheck.CheckMaxRetries,
+		CheckSendProxy:      backend.HealthCheck.CheckSendProxy,
+		TCPConfig:           backend.HealthCheck.TCPConfig,
+		MysqlConfig:         backend.HealthCheck.MysqlConfig,
+		PgsqlConfig:         backend.HealthCheck.PgsqlConfig,
+		LdapConfig:          backend.HealthCheck.LdapConfig,
+		RedisConfig:         backend.HealthCheck.RedisConfig,
+		HTTPConfig:          backend.HealthCheck.HTTPConfig,
+		HTTPSConfig:         backend.HealthCheck.HTTPSConfig,
+		TransientCheckDelay: backend.HealthCheck.TransientCheckDelay,
+	}); err != nil {
+		return nil, fmt.Errorf("failed to update healthcheck: %v", err)
+	}
+
+	return b, nil
+}
+
+func (l *loadbalancers) createFrontend(service *v1.Service, loadbalancer *scwlb.LB, frontend *scwlb.Frontend, backend *scwlb.Backend) (*scwlb.Frontend, error) {
+	f, err := l.api.CreateFrontend(&scwlb.ZonedAPICreateFrontendRequest{
+		Zone:           getLoadBalancerZone(service),
+		LBID:           loadbalancer.ID,
+		Name:           frontend.Name,
+		InboundPort:    frontend.InboundPort,
+		BackendID:      backend.ID,
+		TimeoutClient:  frontend.TimeoutClient,
+		CertificateIDs: &frontend.CertificateIDs,
+		EnableHTTP3:    frontend.EnableHTTP3,
+	})
+
+	return f, err
+}
+
+func (l *loadbalancers) updateFrontend(service *v1.Service, loadbalancer *scwlb.LB, frontend *scwlb.Frontend, backend *scwlb.Backend) (*scwlb.Frontend, error) {
+	f, err := l.api.UpdateFrontend(&scwlb.ZonedAPIUpdateFrontendRequest{
+		Zone:           getLoadBalancerZone(service),
+		FrontendID:     frontend.ID,
+		Name:           frontend.Name,
+		InboundPort:    frontend.InboundPort,
+		BackendID:      backend.ID,
+		TimeoutClient:  frontend.TimeoutClient,
+		CertificateIDs: &frontend.CertificateIDs,
+		EnableHTTP3:    frontend.EnableHTTP3,
+	})
+
+	return f, err
+}
+
+func stringArrayEqual(got, want []string) bool {
+	slices.Sort(got)
+	slices.Sort(want)
+	return reflect.DeepEqual(got, want)
+}
+
+func stringPtrArrayEqual(got, want []*string) bool {
+	slices.SortStableFunc(got, func(a, b *string) bool { return *a < *b })
+	slices.SortStableFunc(want, func(a, b *string) bool { return *a < *b })
+	return reflect.DeepEqual(got, want)
+}
+
+func durationPtrEqual(got, want *time.Duration) bool {
+	if got == nil && want == nil {
+		return true
+	}
+	if got == nil || want == nil {
+		return false
+	}
+	return *got == *want
+}
+
+func scwDurationPtrEqual(got, want *scw.Duration) bool {
+	if got == nil && want == nil {
+		return true
+	}
+	if got == nil || want == nil {
+		return false
+	}
+	return *got == *want
+}
+
+func int32PtrEqual(got, want *int32) bool {
+	if got == nil && want == nil {
+		return true
+	}
+	if got == nil || want == nil {
+		return false
+	}
+	return *got == *want
+}
+
+func chunkArray(array []string, maxChunkSize int) [][]string {
+	result := [][]string{}
+
+	for len(array) > 0 {
+		chunkSize := maxChunkSize
+		if len(array) < maxChunkSize {
+			chunkSize = len(array)
+		}
+
+		result = append(result, array[:chunkSize])
+		array = array[chunkSize:]
+	}
+
+	return result
+}
+
+// makeACLPrefix returns the ACL prefix for rules
+func makeACLPrefix(frontend *scwlb.Frontend) string {
+	if frontend == nil {
+		return "lb-source-range"
+	}
+	return fmt.Sprintf("%s-lb-source-range", frontend.ID)
+}
+
+func makeACLSpecs(service *v1.Service, nodes []*v1.Node, frontend *scwlb.Frontend) []*scwlb.ACLSpec {
+	if len(service.Spec.LoadBalancerSourceRanges) == 0 {
+		return []*scwlb.ACLSpec{}
+	}
+
+	aclPrefix := makeACLPrefix(frontend)
+	whitelist := extractNodesInternalIps(nodes)
+	whitelist = append(whitelist, extractNodesExternalIps(nodes)...)
+	whitelist = append(whitelist, service.Spec.LoadBalancerSourceRanges...)
+
+	slices.Sort(whitelist)
+
+	subnetsChunks := chunkArray(whitelist, MaxEntriesPerACL)
+	acls := make([]*scwlb.ACLSpec, len(subnetsChunks)+1)
+
+	for idx, subnets := range subnetsChunks {
+		acls[idx] = &scwlb.ACLSpec{
+			Name: fmt.Sprintf("%s-%d", aclPrefix, idx),
+			Action: &scwlb.ACLAction{
+				Type: scwlb.ACLActionTypeAllow,
+			},
+			Index: int32(idx),
+			Match: &scwlb.ACLMatch{
+				IPSubnet: scw.StringSlicePtr(subnets),
+			},
+		}
+	}
+
+	acls[len(acls)-1] = &scwlb.ACLSpec{
+		Name: fmt.Sprintf("%s-end", aclPrefix),
+		Action: &scwlb.ACLAction{
+			Type: scwlb.ACLActionTypeDeny,
+		},
+		Index: int32(len(acls) - 1),
+		Match: &scwlb.ACLMatch{
+			IPSubnet: scw.StringSlicePtr([]string{"0.0.0.0/0", "::/0"}),
+		},
+	}
+
+	return acls
 }
