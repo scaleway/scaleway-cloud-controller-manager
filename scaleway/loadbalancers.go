@@ -1520,6 +1520,9 @@ func getHTTPHealthCheck(service *v1.Service, nodePort int32) (*scwlb.HealthCheck
 	if err != nil {
 		return nil, err
 	}
+	if uri.Path == "" {
+		uri.Path = "/"
+	}
 
 	method, err := getHTTPHealthCheckMethod(service, nodePort)
 	if err != nil {
@@ -1547,6 +1550,9 @@ func getHTTPSHealthCheck(service *v1.Service, nodePort int32) (*scwlb.HealthChec
 	uri, err := url.Parse(fmt.Sprintf("https://%s", uriStr))
 	if err != nil {
 		return nil, err
+	}
+	if uri.Path == "" {
+		uri.Path = "/"
 	}
 
 	method, err := getHTTPHealthCheckMethod(service, nodePort)
