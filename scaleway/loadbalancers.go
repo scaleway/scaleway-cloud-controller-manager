@@ -88,6 +88,10 @@ const (
 	// NB: Required when setting service.beta.kubernetes.io/scw-loadbalancer-health-check-type to "http" or "https"
 	serviceAnnotationLoadBalancerHealthCheckHTTPMethod = "service.beta.kubernetes.io/scw-loadbalancer-health-check-http-method"
 
+	// serviceAnnotationLoadBalancerHealthCheckHTTPHost is the HTTP host header used by the "http" health check
+	// It is possible to set the method per port, like "80:mydomain1.tld;443,8443:mydomain2.tld"
+	serviceAnnotationLoadBalancerHealthCheckHTTPHost = "service.beta.kubernetes.io/scw-loadbalancer-health-check-http-host"
+
 	// serviceAnnotationLoadBalancerHealthCheckHTTPCode is the HTTP code that the "http" health check will be matching against
 	// It is possible to set the code per port, like "80:404;443,8443:204"
 	// NB: Required when setting service.beta.kubernetes.io/scw-loadbalancer-health-check-type to "http" or "https"
@@ -1505,6 +1509,21 @@ func getHTTPHealthCheckMethod(service *v1.Service, nodePort int32) (string, erro
 	return method, nil
 }
 
+func getHTTPHealthCheckHost(service *v1.Service, nodePort int32) (string, error) {
+	annotation, ok := service.Annotations[serviceAnnotationLoadBalancerHealthCheckHTTPHost]
+	if !ok {
+		return "", nil
+	}
+
+	method, err := getValueForPort(service, nodePort, annotation)
+	if err != nil {
+		klog.Errorf("could not get value for annotation %s and port %d", serviceAnnotationLoadBalancerHealthCheckHTTPHost, nodePort)
+		return "", err
+	}
+
+	return method, nil
+}
+
 func getHTTPHealthCheck(service *v1.Service, nodePort int32) (*scwlb.HealthCheckHTTPConfig, error) {
 	code, err := getHTTPHealthCheckCode(service, nodePort)
 	if err != nil {
@@ -1518,11 +1537,16 @@ func getHTTPHealthCheck(service *v1.Service, nodePort int32) (*scwlb.HealthCheck
 	if err != nil {
 		return nil, err
 	}
+	host, err := getHTTPHealthCheckHost(service, nodePort)
+	if err != nil {
+		return nil, err
+	}
 
 	return &scwlb.HealthCheckHTTPConfig{
-		Method: method,
-		Code:   &code,
-		URI:    uri,
+		Method:     method,
+		Code:       &code,
+		URI:        uri,
+		HostHeader: host,
 	}, nil
 }
 

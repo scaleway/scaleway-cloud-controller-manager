@@ -75,6 +75,10 @@ This is the annotation to set the HTTP method used by the `http` health check.
 It is possible to set the method per port, like `80:GET;443,8443:POST`.
 NB: Required when setting service.beta.kubernetes.io/scw-loadbalancer-health-check-type to `http` or `https`.
 
+### `service.beta.kubernetes.io/scw-loadbalancer-health-check-http-host`
+This is the annotation to set the HTTP host header used by the "http" health check.
+It is possible to set the method per port, like `80:mydomain1.tld;443,8443:mydomain2.tld`.
+
 ### `service.beta.kubernetes.io/scw-loadbalancer-health-check-http-code`
 This is the annotation to set the HTTP code that the `http` health check will be matching against.
 It is possible to set the code per port, like `80:404;443,8443:204`.
