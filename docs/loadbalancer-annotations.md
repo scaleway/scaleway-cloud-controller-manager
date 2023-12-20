@@ -67,17 +67,13 @@ The default value is `5`.
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-health-check-http-uri`
 This is the annotation to set the URI that is used by the `http` health check.
-It is possible to set the uri per port, like `80:/;443,8443:/healthz`.
+It is possible to set the uri per port, like `80:/;443,8443:mydomain.tld/healthz`.
 NB: Required when setting service.beta.kubernetes.io/scw-loadbalancer-health-check-type to `http` or `https`.
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-health-check-http-method`
 This is the annotation to set the HTTP method used by the `http` health check.
 It is possible to set the method per port, like `80:GET;443,8443:POST`.
 NB: Required when setting service.beta.kubernetes.io/scw-loadbalancer-health-check-type to `http` or `https`.
-
-### `service.beta.kubernetes.io/scw-loadbalancer-health-check-http-host`
-This is the annotation to set the HTTP host header used by the "http" health check.
-It is possible to set the method per port, like `80:mydomain1.tld;443,8443:mydomain2.tld`.
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-health-check-http-code`
 This is the annotation to set the HTTP code that the `http` health check will be matching against.

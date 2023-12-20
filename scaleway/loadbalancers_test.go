@@ -941,6 +941,30 @@ func TestBackendEquals(t *testing.T) {
 		want bool
 	}{"with a different TimeoutTunnel", reference, diff, false})
 
+	httpRef := deepCloneBackend(reference)
+	httpRef.HealthCheck.TCPConfig = nil
+	httpRef.HealthCheck.HTTPConfig = &scwlb.HealthCheckHTTPConfig{
+		URI:    "/",
+		Method: "POST",
+		Code:   scw.Int32Ptr(200),
+	}
+	httpDiff := deepCloneBackend(httpRef)
+	matrix = append(matrix, struct {
+		Name string
+		a    *scwlb.Backend
+		b    *scwlb.Backend
+		want bool
+	}{"with same HTTP healthchecks", httpRef, httpDiff, true})
+
+	httpDiff = deepCloneBackend(httpRef)
+	httpDiff.HealthCheck.HTTPConfig.Code = scw.Int32Ptr(404)
+	matrix = append(matrix, struct {
+		Name string
+		a    *scwlb.Backend
+		b    *scwlb.Backend
+		want bool
+	}{"with same HTTP healthchecks", httpRef, httpDiff, false})
+
 	for _, tt := range matrix {
 		t.Run(tt.Name, func(t *testing.T) {
 			got := backendEquals(tt.a, tt.b)

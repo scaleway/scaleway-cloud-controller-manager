@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"reflect"
 	"strconv"
@@ -79,7 +80,7 @@ const (
 	serviceAnnotationLoadBalancerHealthCheckMaxRetries = "service.beta.kubernetes.io/scw-loadbalancer-health-check-max-retries"
 
 	// serviceAnnotationLoadBalancerHealthCheckHTTPURI is the URI that is used by the "http" health check
-	// It is possible to set the uri per port, like "80:/;443,8443:/healthz"
+	// It is possible to set the uri per port, like "80:/;443,8443:mydomain.tld/healthz"
 	// NB: Required when setting service.beta.kubernetes.io/scw-loadbalancer-health-check-type to "http" or "https"
 	serviceAnnotationLoadBalancerHealthCheckHTTPURI = "service.beta.kubernetes.io/scw-loadbalancer-health-check-http-uri"
 
@@ -87,10 +88,6 @@ const (
 	// It is possible to set the method per port, like "80:GET;443,8443:POST"
 	// NB: Required when setting service.beta.kubernetes.io/scw-loadbalancer-health-check-type to "http" or "https"
 	serviceAnnotationLoadBalancerHealthCheckHTTPMethod = "service.beta.kubernetes.io/scw-loadbalancer-health-check-http-method"
-
-	// serviceAnnotationLoadBalancerHealthCheckHTTPHost is the HTTP host header used by the "http" health check
-	// It is possible to set the method per port, like "80:mydomain1.tld;443,8443:mydomain2.tld"
-	serviceAnnotationLoadBalancerHealthCheckHTTPHost = "service.beta.kubernetes.io/scw-loadbalancer-health-check-http-host"
 
 	// serviceAnnotationLoadBalancerHealthCheckHTTPCode is the HTTP code that the "http" health check will be matching against
 	// It is possible to set the code per port, like "80:404;443,8443:204"
@@ -1509,35 +1506,22 @@ func getHTTPHealthCheckMethod(service *v1.Service, nodePort int32) (string, erro
 	return method, nil
 }
 
-func getHTTPHealthCheckHost(service *v1.Service, nodePort int32) (string, error) {
-	annotation, ok := service.Annotations[serviceAnnotationLoadBalancerHealthCheckHTTPHost]
-	if !ok {
-		return "", nil
-	}
-
-	method, err := getValueForPort(service, nodePort, annotation)
-	if err != nil {
-		klog.Errorf("could not get value for annotation %s and port %d", serviceAnnotationLoadBalancerHealthCheckHTTPHost, nodePort)
-		return "", err
-	}
-
-	return method, nil
-}
-
 func getHTTPHealthCheck(service *v1.Service, nodePort int32) (*scwlb.HealthCheckHTTPConfig, error) {
 	code, err := getHTTPHealthCheckCode(service, nodePort)
 	if err != nil {
 		return nil, err
 	}
-	uri, err := getHTTPHealthCheckURI(service, nodePort)
+
+	uriStr, err := getHTTPHealthCheckURI(service, nodePort)
 	if err != nil {
 		return nil, err
 	}
+	uri, err := url.Parse(fmt.Sprintf("http://%s", uriStr))
+	if err != nil {
+		return nil, err
+	}
+
 	method, err := getHTTPHealthCheckMethod(service, nodePort)
-	if err != nil {
-		return nil, err
-	}
-	host, err := getHTTPHealthCheckHost(service, nodePort)
 	if err != nil {
 		return nil, err
 	}
@@ -1545,8 +1529,8 @@ func getHTTPHealthCheck(service *v1.Service, nodePort int32) (*scwlb.HealthCheck
 	return &scwlb.HealthCheckHTTPConfig{
 		Method:     method,
 		Code:       &code,
-		URI:        uri,
-		HostHeader: host,
+		URI:        uri.Path,
+		HostHeader: uri.Host,
 	}, nil
 }
 
@@ -1555,19 +1539,27 @@ func getHTTPSHealthCheck(service *v1.Service, nodePort int32) (*scwlb.HealthChec
 	if err != nil {
 		return nil, err
 	}
-	uri, err := getHTTPHealthCheckURI(service, nodePort)
+
+	uriStr, err := getHTTPHealthCheckURI(service, nodePort)
 	if err != nil {
 		return nil, err
 	}
+	uri, err := url.Parse(fmt.Sprintf("https://%s", uriStr))
+	if err != nil {
+		return nil, err
+	}
+
 	method, err := getHTTPHealthCheckMethod(service, nodePort)
 	if err != nil {
 		return nil, err
 	}
 
 	return &scwlb.HealthCheckHTTPSConfig{
-		Method: method,
-		Code:   &code,
-		URI:    uri,
+		Method:     method,
+		Code:       &code,
+		URI:        uri.Path,
+		HostHeader: uri.Host,
+		Sni:        uri.Host,
 	}, nil
 }
 
@@ -1929,65 +1921,9 @@ func backendEquals(got, want *scwlb.Backend) bool {
 		return false
 	}
 
-	// TODO
-	if got.HealthCheck != want.HealthCheck {
-		if got.HealthCheck == nil || want.HealthCheck == nil {
-			klog.V(3).Infof("backend.HealthCheck: %s - %s", got.HealthCheck, want.HealthCheck)
-			return false
-		}
-
-		if got.HealthCheck.Port != want.HealthCheck.Port {
-			klog.V(3).Infof("backend.HealthCheck.Port: %s - %s", got.HealthCheck.Port, want.HealthCheck.Port)
-			return false
-		}
-		if !durationPtrEqual(got.HealthCheck.CheckDelay, want.HealthCheck.CheckDelay) {
-			klog.V(3).Infof("backend.HealthCheck.CheckDelay: %s - %s", got.HealthCheck.CheckDelay, want.HealthCheck.CheckDelay)
-			return false
-		}
-		if !durationPtrEqual(got.HealthCheck.CheckTimeout, want.HealthCheck.CheckTimeout) {
-			klog.V(3).Infof("backend.HealthCheck.CheckTimeout: %s - %s", got.HealthCheck.CheckTimeout, want.HealthCheck.CheckTimeout)
-			return false
-		}
-		if got.HealthCheck.CheckMaxRetries != want.HealthCheck.CheckMaxRetries {
-			klog.V(3).Infof("backend.HealthCheck.CheckMaxRetries: %s - %s", got.HealthCheck.CheckMaxRetries, want.HealthCheck.CheckMaxRetries)
-			return false
-		}
-		if got.HealthCheck.CheckSendProxy != want.HealthCheck.CheckSendProxy {
-			klog.V(3).Infof("backend.HealthCheck.CheckSendProxy: %s - %s", got.HealthCheck.CheckSendProxy, want.HealthCheck.CheckSendProxy)
-			return false
-		}
-		if (got.HealthCheck.TCPConfig == nil) != (want.HealthCheck.TCPConfig == nil) {
-			klog.V(3).Infof("backend.HealthCheck.TCPConfig: %s - %s", got.HealthCheck.TCPConfig, want.HealthCheck.TCPConfig)
-			return false
-		}
-		if (got.HealthCheck.MysqlConfig == nil) != (want.HealthCheck.MysqlConfig == nil) {
-			klog.V(3).Infof("backend.HealthCheck.MysqlConfig: %s - %s", got.HealthCheck.MysqlConfig, want.HealthCheck.MysqlConfig)
-			return false
-		}
-		if (got.HealthCheck.PgsqlConfig == nil) != (want.HealthCheck.PgsqlConfig == nil) {
-			klog.V(3).Infof("backend.HealthCheck.PgsqlConfig: %s - %s", got.HealthCheck.PgsqlConfig, want.HealthCheck.PgsqlConfig)
-			return false
-		}
-		if (got.HealthCheck.LdapConfig == nil) != (want.HealthCheck.LdapConfig == nil) {
-			klog.V(3).Infof("backend.HealthCheck.LdapConfig: %s - %s", got.HealthCheck.LdapConfig, want.HealthCheck.LdapConfig)
-			return false
-		}
-		if (got.HealthCheck.RedisConfig == nil) != (want.HealthCheck.RedisConfig == nil) {
-			klog.V(3).Infof("backend.HealthCheck.RedisConfig: %s - %s", got.HealthCheck.RedisConfig, want.HealthCheck.RedisConfig)
-			return false
-		}
-		if (got.HealthCheck.HTTPConfig == nil) != (want.HealthCheck.HTTPConfig == nil) {
-			klog.V(3).Infof("backend.HealthCheck.HTTPConfig: %s - %s", got.HealthCheck.HTTPConfig, want.HealthCheck.HTTPConfig)
-			return false
-		}
-		if (got.HealthCheck.HTTPSConfig == nil) != (want.HealthCheck.HTTPSConfig == nil) {
-			klog.V(3).Infof("backend.HealthCheck.HTTPSConfig: %s - %s", got.HealthCheck.HTTPSConfig, want.HealthCheck.HTTPSConfig)
-			return false
-		}
-		if !scwDurationPtrEqual(got.HealthCheck.TransientCheckDelay, want.HealthCheck.TransientCheckDelay) {
-			klog.V(3).Infof("backend.HealthCheck.TransientCheckDelay: %s - %s", got.HealthCheck.TransientCheckDelay, want.HealthCheck.TransientCheckDelay)
-			return false
-		}
+	if !reflect.DeepEqual(got.HealthCheck, want.HealthCheck) {
+		klog.V(3).Infof("backend.HealthCheck: %s - %s", got.HealthCheck, want.HealthCheck)
+		return false
 	}
 
 	return true
@@ -2098,7 +2034,7 @@ func aclsEquals(got []*scwlb.ACL, want []*scwlb.ACLSpec) bool {
 
 	slices.SortStableFunc(got, func(a, b *scwlb.ACL) bool { return a.Index < b.Index })
 	slices.SortStableFunc(want, func(a, b *scwlb.ACLSpec) bool { return a.Index < b.Index })
-	for idx, _ := range want {
+	for idx := range want {
 		if want[idx].Name != got[idx].Name {
 			return false
 		}
@@ -2126,7 +2062,6 @@ func aclsEquals(got []*scwlb.ACL, want []*scwlb.ACLSpec) bool {
 }
 
 func (l *loadbalancers) createBackend(service *v1.Service, loadbalancer *scwlb.LB, backend *scwlb.Backend) (*scwlb.Backend, error) {
-	// TODO: implement createBackend
 	b, err := l.api.CreateBackend(&scwlb.ZonedAPICreateBackendRequest{
 		Zone:                     getLoadBalancerZone(service),
 		LBID:                     loadbalancer.ID,
@@ -2154,7 +2089,6 @@ func (l *loadbalancers) createBackend(service *v1.Service, loadbalancer *scwlb.L
 }
 
 func (l *loadbalancers) updateBackend(service *v1.Service, loadbalancer *scwlb.LB, backend *scwlb.Backend) (*scwlb.Backend, error) {
-	// TODO: implement updateBackend
 	b, err := l.api.UpdateBackend(&scwlb.ZonedAPIUpdateBackendRequest{
 		Zone:                     getLoadBalancerZone(service),
 		BackendID:                backend.ID,
