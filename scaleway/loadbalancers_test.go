@@ -941,6 +941,30 @@ func TestBackendEquals(t *testing.T) {
 		want bool
 	}{"with a different TimeoutTunnel", reference, diff, false})
 
+	httpRef := deepCloneBackend(reference)
+	httpRef.HealthCheck.TCPConfig = nil
+	httpRef.HealthCheck.HTTPConfig = &scwlb.HealthCheckHTTPConfig{
+		URI:    "/",
+		Method: "POST",
+		Code:   scw.Int32Ptr(200),
+	}
+	httpDiff := deepCloneBackend(httpRef)
+	matrix = append(matrix, struct {
+		Name string
+		a    *scwlb.Backend
+		b    *scwlb.Backend
+		want bool
+	}{"with same HTTP healthchecks", httpRef, httpDiff, true})
+
+	httpDiff = deepCloneBackend(httpRef)
+	httpDiff.HealthCheck.HTTPConfig.Code = scw.Int32Ptr(404)
+	matrix = append(matrix, struct {
+		Name string
+		a    *scwlb.Backend
+		b    *scwlb.Backend
+		want bool
+	}{"with same HTTP healthchecks", httpRef, httpDiff, false})
+
 	for _, tt := range matrix {
 		t.Run(tt.Name, func(t *testing.T) {
 			got := backendEquals(tt.a, tt.b)
@@ -1131,6 +1155,76 @@ func TestMakeACLPrefix(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := makeACLPrefix(tt.frontend)
 			if got != tt.want {
+				t.Errorf("want: %v, got: %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGetHTTPHealthCheck(t *testing.T) {
+	matrix := []struct {
+		name string
+		svc  *v1.Service
+		want *scwlb.HealthCheckHTTPConfig
+	}{
+		{"with empty config", &v1.Service{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					"service.beta.kubernetes.io/scw-loadbalancer-health-check-type": "http",
+				},
+			},
+		}, &scwlb.HealthCheckHTTPConfig{URI: "/", Method: "GET", Code: scw.Int32Ptr(200)}},
+
+		{"with just a domain", &v1.Service{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					"service.beta.kubernetes.io/scw-loadbalancer-health-check-type":     "http",
+					"service.beta.kubernetes.io/scw-loadbalancer-health-check-http-uri": "domain.tld",
+				},
+			},
+		}, &scwlb.HealthCheckHTTPConfig{URI: "/", Method: "GET", Code: scw.Int32Ptr(200), HostHeader: "domain.tld"}},
+
+		{"with a domain and path", &v1.Service{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					"service.beta.kubernetes.io/scw-loadbalancer-health-check-type":     "http",
+					"service.beta.kubernetes.io/scw-loadbalancer-health-check-http-uri": "domain.tld/path",
+				},
+			},
+		}, &scwlb.HealthCheckHTTPConfig{URI: "/path", Method: "GET", Code: scw.Int32Ptr(200), HostHeader: "domain.tld"}},
+
+		{"with just a path", &v1.Service{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					"service.beta.kubernetes.io/scw-loadbalancer-health-check-type":     "http",
+					"service.beta.kubernetes.io/scw-loadbalancer-health-check-http-uri": "/path",
+				},
+			},
+		}, &scwlb.HealthCheckHTTPConfig{URI: "/path", Method: "GET", Code: scw.Int32Ptr(200)}},
+
+		{"with a specific code", &v1.Service{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					"service.beta.kubernetes.io/scw-loadbalancer-health-check-type":      "http",
+					"service.beta.kubernetes.io/scw-loadbalancer-health-check-http-code": "404",
+				},
+			},
+		}, &scwlb.HealthCheckHTTPConfig{URI: "/", Method: "GET", Code: scw.Int32Ptr(404)}},
+
+		{"with a specific method", &v1.Service{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					"service.beta.kubernetes.io/scw-loadbalancer-health-check-type":        "http",
+					"service.beta.kubernetes.io/scw-loadbalancer-health-check-http-method": "POST",
+				},
+			},
+		}, &scwlb.HealthCheckHTTPConfig{URI: "/", Method: "POST", Code: scw.Int32Ptr(200)}},
+	}
+
+	for _, tt := range matrix {
+		t.Run(tt.name, func(t *testing.T) {
+			got, _ := getHTTPHealthCheck(tt.svc, int32(80))
+			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("want: %v, got: %v", got, tt.want)
 			}
 		})
