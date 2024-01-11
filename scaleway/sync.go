@@ -25,6 +25,7 @@ import (
 	"github.com/scaleway/scaleway-sdk-go/api/instance/v1"
 	"github.com/scaleway/scaleway-sdk-go/api/lb/v1"
 	"github.com/scaleway/scaleway-sdk-go/scw"
+	"golang.org/x/exp/maps"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/runtime"
@@ -201,18 +202,19 @@ func (s *syncController) syncNodeTags(node *v1.Node) error {
 	patcher := NewNodePatcher(s.clientSet, nodeCopied)
 
 	nodeLabels := map[string]string{}
-	nodeTaints := []v1.Taint{}
+	// Note: taints must be unique by key and effect pair
+	nodeTaints := map[string]v1.Taint{}
 	for _, tag := range server.Server.Tags {
 		if strings.HasPrefix(tag, labelTaintPrefix) {
 			key, value, effect := tagTaintParser(tag)
 			if key == "" {
 				continue
 			}
-			nodeTaints = append(nodeTaints, v1.Taint{
+			nodeTaints[fmt.Sprintf("%s:%s", key, effect)] = v1.Taint{
 				Key:    key,
 				Value:  value,
 				Effect: effect,
-			})
+			}
 		} else {
 			var key string
 			var value string
@@ -251,12 +253,13 @@ func (s *syncController) syncNodeTags(node *v1.Node) error {
 	}
 
 	for _, taint := range node.Spec.Taints {
-		if !strings.HasPrefix(taint.Key, taintsPrefix) {
-			nodeTaints = append(nodeTaints, taint)
+		taintUniqueKey := fmt.Sprintf("%s:%s", taint.Key, taint.Effect)
+		if _, ok := nodeTaints[taintUniqueKey]; !ok && !strings.HasPrefix(taint.Key, taintsPrefix) {
+			nodeTaints[taintUniqueKey] = taint
 		}
 	}
 
-	nodeCopied.Spec.Taints = nodeTaints
+	nodeCopied.Spec.Taints = maps.Values(nodeTaints)
 	err = patcher.Patch()
 	if err != nil {
 		klog.Errorf("error patching service: %v", err)
