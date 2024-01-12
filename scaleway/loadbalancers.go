@@ -1958,7 +1958,7 @@ func compareFrontends(got []*scwlb.Frontend, want map[int32]*scwlb.Frontend) fro
 				keep[target.InboundPort] = current
 			}
 		} else {
-			remove[target.InboundPort] = current
+			remove[current.InboundPort] = current
 		}
 	}
 
@@ -2007,7 +2007,7 @@ func compareBackends(got []*scwlb.Backend, want map[int32]*scwlb.Backend) backen
 				keep[target.ForwardPort] = current
 			}
 		} else {
-			remove[target.ForwardPort] = current
+			remove[current.ForwardPort] = current
 		}
 	}
 
