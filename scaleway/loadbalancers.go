@@ -747,7 +747,7 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 		if !stringArrayEqual(backend.Pool, targetIPs) {
 			klog.V(3).Infof("update server list for backend: %s port: %d loadbalancer: %s", backend.ID, port.NodePort, loadbalancer.ID)
 			if _, err := l.api.SetBackendServers(&scwlb.ZonedAPISetBackendServersRequest{
-				Zone:      getLoadBalancerZone(service),
+				Zone:      loadbalancer.Zone,
 				BackendID: backend.ID,
 				ServerIP:  targetIPs,
 			}); err != nil {
@@ -800,7 +800,7 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 			klog.Infof("remove all ACLs from frontend: %s port: %d loadbalancer: %s", frontend.ID, frontend.InboundPort, loadbalancer.ID)
 			for _, acl := range aclsResp.ACLs {
 				if err := l.api.DeleteACL(&scwlb.ZonedAPIDeleteACLRequest{
-					Zone:  getLoadBalancerZone(service),
+					Zone:  loadbalancer.Zone,
 					ACLID: acl.ID,
 				}); err != nil {
 					return fmt.Errorf("failed removing ACL %s from frontend: %s port: %d loadbalancer: %s err: %v", acl.Name, frontend.ID, frontend.InboundPort, loadbalancer.ID, err)
@@ -810,7 +810,7 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 			klog.Infof("create all ACLs for frontend: %s port: %d loadbalancer: %s", frontend.ID, frontend.InboundPort, loadbalancer.ID)
 			for _, acl := range svcAcls {
 				if _, err := l.api.SetACLs(&scwlb.ZonedAPISetACLsRequest{
-					Zone:       getLoadBalancerZone(service),
+					Zone:       loadbalancer.Zone,
 					FrontendID: frontend.ID,
 					ACLs:       svcAcls,
 				}); err != nil {
@@ -2069,7 +2069,7 @@ func aclsEquals(got []*scwlb.ACL, want []*scwlb.ACLSpec) bool {
 
 func (l *loadbalancers) createBackend(service *v1.Service, loadbalancer *scwlb.LB, backend *scwlb.Backend) (*scwlb.Backend, error) {
 	b, err := l.api.CreateBackend(&scwlb.ZonedAPICreateBackendRequest{
-		Zone:                     getLoadBalancerZone(service),
+		Zone:                     loadbalancer.Zone,
 		LBID:                     loadbalancer.ID,
 		Name:                     backend.Name,
 		ForwardProtocol:          backend.ForwardProtocol,
@@ -2096,7 +2096,7 @@ func (l *loadbalancers) createBackend(service *v1.Service, loadbalancer *scwlb.L
 
 func (l *loadbalancers) updateBackend(service *v1.Service, loadbalancer *scwlb.LB, backend *scwlb.Backend) (*scwlb.Backend, error) {
 	b, err := l.api.UpdateBackend(&scwlb.ZonedAPIUpdateBackendRequest{
-		Zone:                     getLoadBalancerZone(service),
+		Zone:                     loadbalancer.Zone,
 		BackendID:                backend.ID,
 		Name:                     backend.Name,
 		ForwardProtocol:          backend.ForwardProtocol,
@@ -2117,7 +2117,7 @@ func (l *loadbalancers) updateBackend(service *v1.Service, loadbalancer *scwlb.L
 	}
 
 	if _, err := l.api.UpdateHealthCheck(&scwlb.ZonedAPIUpdateHealthCheckRequest{
-		Zone:                getLoadBalancerZone(service),
+		Zone:                loadbalancer.Zone,
 		BackendID:           backend.ID,
 		Port:                backend.ForwardPort,
 		CheckDelay:          backend.HealthCheck.CheckDelay,
@@ -2141,7 +2141,7 @@ func (l *loadbalancers) updateBackend(service *v1.Service, loadbalancer *scwlb.L
 
 func (l *loadbalancers) createFrontend(service *v1.Service, loadbalancer *scwlb.LB, frontend *scwlb.Frontend, backend *scwlb.Backend) (*scwlb.Frontend, error) {
 	f, err := l.api.CreateFrontend(&scwlb.ZonedAPICreateFrontendRequest{
-		Zone:           getLoadBalancerZone(service),
+		Zone:           loadbalancer.Zone,
 		LBID:           loadbalancer.ID,
 		Name:           frontend.Name,
 		InboundPort:    frontend.InboundPort,
@@ -2156,7 +2156,7 @@ func (l *loadbalancers) createFrontend(service *v1.Service, loadbalancer *scwlb.
 
 func (l *loadbalancers) updateFrontend(service *v1.Service, loadbalancer *scwlb.LB, frontend *scwlb.Frontend, backend *scwlb.Backend) (*scwlb.Frontend, error) {
 	f, err := l.api.UpdateFrontend(&scwlb.ZonedAPIUpdateFrontendRequest{
-		Zone:           getLoadBalancerZone(service),
+		Zone:           loadbalancer.Zone,
 		FrontendID:     frontend.ID,
 		Name:           frontend.Name,
 		InboundPort:    frontend.InboundPort,
