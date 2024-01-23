@@ -58,7 +58,7 @@ func (i *instances) NodeAddresses(ctx context.Context, name types.NodeName) ([]v
 	if err != nil {
 		return nil, err
 	}
-	return i.instanceAddresses(server), nil
+	return i.instanceAddresses(server)
 }
 
 // NodeAddressesByProviderID returns the addresses of the specified instance.
@@ -68,7 +68,7 @@ func (i *instances) NodeAddressesByProviderID(ctx context.Context, providerID st
 	if err != nil {
 		return nil, err
 	}
-	return i.instanceAddresses(instanceServer), nil
+	return i.instanceAddresses(instanceServer)
 }
 
 // InstanceID returns the cloud provider ID of the node with the specified NodeName.
@@ -161,7 +161,7 @@ func (i *instances) GetZoneByNodeName(ctx context.Context, nodeName types.NodeNa
 // ===========================
 
 // instanceAddresses extracts NodeAdress from the server
-func (i *instances) instanceAddresses(server *scwinstance.Server) []v1.NodeAddress {
+func (i *instances) instanceAddresses(server *scwinstance.Server) ([]v1.NodeAddress, error) {
 	addresses := []v1.NodeAddress{
 		{Type: v1.NodeHostName, Address: server.Hostname},
 	}
@@ -194,13 +194,11 @@ func (i *instances) instanceAddresses(server *scwinstance.Server) []v1.NodeAddre
 			Region:       region,
 		})
 		if err != nil {
-			klog.Errorf("unable to query ipam for node %s: %v", server.Name, err)
-			return addresses
+			return addresses, fmt.Errorf("unable to query ipam for node %s: %v", server.Name, err)
 		}
 
 		if len(ips.IPs) == 0 {
-			klog.Errorf("no private network ip for node %s", server.Name)
-			return addresses
+			return addresses, fmt.Errorf("no private network ip for node %s", server.Name)
 		}
 
 		for _, nicIP := range ips.IPs {
@@ -210,7 +208,7 @@ func (i *instances) instanceAddresses(server *scwinstance.Server) []v1.NodeAddre
 			)
 		}
 
-		return addresses
+		return addresses, nil
 	}
 
 	// fallback to legacy private ip
@@ -222,7 +220,7 @@ func (i *instances) instanceAddresses(server *scwinstance.Server) []v1.NodeAddre
 		)
 	}
 
-	return addresses
+	return addresses, nil
 }
 
 func instanceZone(instanceServer *scwinstance.Server) (cloudprovider.Zone, error) {
@@ -369,10 +367,15 @@ func (i *instances) InstanceMetadata(ctx context.Context, node *v1.Node) (*cloud
 		return nil, err
 	}
 
+	addresses, err := i.instanceAddresses(instance)
+	if err != nil {
+		return nil, err
+	}
+
 	return &cloudprovider.InstanceMetadata{
 		ProviderID:    BuildProviderID(InstanceTypeInstance, instance.Zone.String(), instance.ID),
 		InstanceType:  instance.CommercialType,
-		NodeAddresses: i.instanceAddresses(instance),
+		NodeAddresses: addresses,
 		Region:        region.String(),
 		Zone:          instance.Zone.String(),
 	}, nil
