@@ -1193,6 +1193,15 @@ func TestGetHTTPHealthCheck(t *testing.T) {
 			},
 		}, &scwlb.HealthCheckHTTPConfig{URI: "/path", Method: "GET", Code: scw.Int32Ptr(200), HostHeader: "domain.tld"}},
 
+		{"with a domain, path and query params", &v1.Service{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					"service.beta.kubernetes.io/scw-loadbalancer-health-check-type":     "http",
+					"service.beta.kubernetes.io/scw-loadbalancer-health-check-http-uri": "domain.tld/path?password=xxxx",
+				},
+			},
+		}, &scwlb.HealthCheckHTTPConfig{URI: "/path?password=xxxx", Method: "GET", Code: scw.Int32Ptr(200), HostHeader: "domain.tld"}},
+
 		{"with just a path", &v1.Service{
 			ObjectMeta: metav1.ObjectMeta{
 				Annotations: map[string]string{
@@ -1225,7 +1234,7 @@ func TestGetHTTPHealthCheck(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got, _ := getHTTPHealthCheck(tt.svc, int32(80))
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("want: %v, got: %v", got, tt.want)
+				t.Errorf("want: %v, got: %v", tt.want, got)
 			}
 		})
 	}

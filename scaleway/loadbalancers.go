@@ -1532,7 +1532,7 @@ func getHTTPHealthCheck(service *v1.Service, nodePort int32) (*scwlb.HealthCheck
 	return &scwlb.HealthCheckHTTPConfig{
 		Method:     method,
 		Code:       &code,
-		URI:        uri.Path,
+		URI:        uri.RequestURI(),
 		HostHeader: uri.Host,
 	}, nil
 }
