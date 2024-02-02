@@ -128,8 +128,8 @@ This is the annotation that modifes what occurs when a backend server is marked 
 The default value is `on_marked_down_action_none` and the possible values are `on_marked_down_action_none` and `shutdown_sessions`.
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-force-internal-ip`
-This is the annotation that force the usage of InternalIP inside the loadbalancer.
-Normally, the cloud controller manager use ExternalIP to be nodes region-free (or public InternalIP in case of Baremetal).
+**This field is DEPRECATED**. This annotation is deprecated and will be removed in a future release.
+It used to make the CCM use internal IPs instead of public ones for Public only clusters.
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-use-hostname`
 This is the annotation that force the use of the LB hostname instead of the public IP.
@@ -153,7 +153,7 @@ Expected format: `"Key1=Val1,Key2=Val2"`
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-redispatch-attempt-count`
 This is the annotation to activate redispatch on another backend server in case of failure
-The default value is 0, which disable the redispatch.
+The default value is 0, which disable the redispatch. Only a value of 0 or 1 are allowed.
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-max-retries`
 This is the annotation to configure the number of retry on connection failure
