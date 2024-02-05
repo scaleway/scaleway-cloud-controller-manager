@@ -179,7 +179,7 @@ func (l *loadbalancers) EnsureLoadBalancer(ctx context.Context, clusterName stri
 		privateModeMismatch := lbPrivate != (len(lb.IP) == 0)
 		reservedIPMismatch := service.Spec.LoadBalancerIP != "" && service.Spec.LoadBalancerIP != lb.IP[0].IPAddress
 		if privateModeMismatch || reservedIPMismatch {
-			err = l.deleteLoadBalancer(ctx, lb, service)
+			err = l.deleteLoadBalancer(ctx, lb, clusterName, service)
 			if err != nil {
 				return nil, err
 			}
@@ -261,25 +261,68 @@ func (l *loadbalancers) EnsureLoadBalancerDeleted(ctx context.Context, clusterNa
 	}
 
 	if lbExternallyManaged {
-		return l.removeManagedResources(ctx, lb, service)
+		return l.removeExternallyManagedResources(ctx, lb, service)
 	}
 
-	return l.deleteLoadBalancer(ctx, lb, service)
+	return l.deleteLoadBalancer(ctx, lb, clusterName, service)
 }
 
-func (l *loadbalancers) removeManagedResources(ctx context.Context, lb *scwlb.LB, service *v1.Service) error {
-	// TODO: remove frontend/backends
-	return fmt.Errorf("unimplemented")
+func (l *loadbalancers) removeExternallyManagedResources(ctx context.Context, lb *scwlb.LB, service *v1.Service) error {
+	prefixFilter := fmt.Sprintf("%s_", string(service.UID))
+
+	// List all frontends associated with the LB
+	respFrontends, err := l.api.ListFrontends(&scwlb.ZonedAPIListFrontendsRequest{
+		Name: &prefixFilter,
+		Zone: lb.Zone,
+		LBID: lb.ID,
+	}, scw.WithAllPages())
+	if err != nil {
+		return fmt.Errorf("error listing frontends for load balancer %s: %v", lb.ID, err)
+	}
+
+	// List all backends associated with the LB
+	respBackends, err := l.api.ListBackends(&scwlb.ZonedAPIListBackendsRequest{
+		Name: &prefixFilter,
+		Zone: lb.Zone,
+		LBID: lb.ID,
+	}, scw.WithAllPages())
+	if err != nil {
+		return fmt.Errorf("error listing backend for load balancer %s: %v", lb.ID, err)
+	}
+
+	// Remove extra frontends
+	for _, f := range respFrontends.Frontends {
+		klog.V(3).Infof("deleting frontend: %s port: %d loadbalancer: %s", f.ID, f.InboundPort, lb.ID)
+		if err := l.api.DeleteFrontend(&scwlb.ZonedAPIDeleteFrontendRequest{
+			Zone:       lb.Zone,
+			FrontendID: f.ID,
+		}); err != nil {
+			return fmt.Errorf("failed deleting frontend: %s port: %d loadbalancer: %s err: %v", f.ID, f.InboundPort, lb.ID, err)
+		}
+	}
+
+	// Remove extra backends
+	for _, b := range respBackends.Backends {
+		klog.V(3).Infof("deleting backend: %s port: %d loadbalancer: %s", b.ID, b.ForwardPort, lb.ID)
+		if err := l.api.DeleteBackend(&scwlb.ZonedAPIDeleteBackendRequest{
+			Zone:      lb.Zone,
+			BackendID: b.ID,
+		}); err != nil {
+			return fmt.Errorf("failed deleting backend: %s port: %d loadbalancer: %s err: %v", b.ID, b.ForwardPort, lb.ID, err)
+		}
+	}
+
+	return nil
 }
 
-func (l *loadbalancers) deleteLoadBalancer(ctx context.Context, lb *scwlb.LB, service *v1.Service) error {
+func (l *loadbalancers) deleteLoadBalancer(ctx context.Context, lb *scwlb.LB, clusterName string, service *v1.Service) error {
 	// remove loadbalancer annotation
 	if err := l.unannotateAndPatch(service); err != nil {
 		return err
 	}
 
 	// if loadbalancer is renamed, do not delete it.
-	if lb.Name != l.GetLoadBalancerName(ctx, "", service) {
+	if lb.Name != l.GetLoadBalancerName(ctx, clusterName, service) {
 		klog.Warningf("load balancer for service %s/%s was renamed, not removing", service.Namespace, service.Name)
 		return nil
 	}
@@ -362,15 +405,20 @@ func (l *loadbalancers) fetchLoadBalancer(ctx context.Context, clusterName strin
 			return nil, err
 		}
 
+		if lbExternallyManaged && strings.HasPrefix(resp.Name, os.Getenv(scwCcmPrefixEnv)) {
+			klog.Errorf("externally managed loadbalancer must not be prefixed by the cluster id")
+			return nil, fmt.Errorf("externally managed loadbalancer must not be prefixed by the cluster id")
+		}
+
 		return resp, nil
 	}
 
 	// fallback to fetching LoadBalancer by name
-	return l.getLoadbalancerByName(ctx, service)
+	return l.getLoadbalancerByName(ctx, clusterName, service)
 }
 
-func (l *loadbalancers) getLoadbalancerByName(ctx context.Context, service *v1.Service) (*scwlb.LB, error) {
-	name := l.GetLoadBalancerName(ctx, "", service)
+func (l *loadbalancers) getLoadbalancerByName(ctx context.Context, clusterName string, service *v1.Service) (*scwlb.LB, error) {
+	name := l.GetLoadBalancerName(ctx, clusterName, service)
 
 	var loadbalancer *scwlb.LB
 	resp, err := l.api.ListLBs(&scwlb.ZonedAPIListLBsRequest{
