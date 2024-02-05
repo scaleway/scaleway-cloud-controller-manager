@@ -3,14 +3,15 @@ module github.com/scaleway/scaleway-cloud-controller-manager
 go 1.21
 
 require (
-	github.com/scaleway/scaleway-sdk-go v1.0.0-beta.21
-	google.golang.org/protobuf v1.31.0
+	github.com/scaleway/scaleway-sdk-go v1.0.0-beta.22
+	golang.org/x/exp v0.0.0-20220722155223-a9213eeb770e
+	google.golang.org/protobuf v1.32.0
 	k8s.io/api v0.28.2
 	k8s.io/apimachinery v0.28.2
 	k8s.io/client-go v0.28.2
 	k8s.io/cloud-provider v0.28.2
 	k8s.io/component-base v0.28.2
-	k8s.io/klog/v2 v2.100.1
+	k8s.io/klog/v2 v2.120.1
 )
 
 require (
@@ -29,7 +30,7 @@ require (
 	github.com/evanphx/json-patch v4.12.0+incompatible // indirect
 	github.com/felixge/httpsnoop v1.0.3 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
-	github.com/go-logr/logr v1.2.4 // indirect
+	github.com/go-logr/logr v1.4.1 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-openapi/jsonpointer v0.19.6 // indirect
 	github.com/go-openapi/jsonreference v0.20.2 // indirect
@@ -79,7 +80,6 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.19.0 // indirect
 	golang.org/x/crypto v0.11.0 // indirect
-	golang.org/x/exp v0.0.0-20220722155223-a9213eeb770e // indirect
 	golang.org/x/net v0.13.0 // indirect
 	golang.org/x/oauth2 v0.8.0 // indirect
 	golang.org/x/sync v0.2.0 // indirect
