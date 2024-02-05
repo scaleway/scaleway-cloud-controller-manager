@@ -2243,7 +2243,7 @@ func makeACLSpecs(service *v1.Service, nodes []*v1.Node, frontend *scwlb.Fronten
 	aclPrefix := makeACLPrefix(frontend)
 	whitelist := extractNodesInternalIps(nodes)
 	whitelist = append(whitelist, extractNodesExternalIps(nodes)...)
-	whitelist = append(whitelist, service.Spec.LoadBalancerSourceRanges...)
+	whitelist = append(whitelist, strip32SubnetMasks(service.Spec.LoadBalancerSourceRanges)...)
 
 	slices.Sort(whitelist)
 
@@ -2275,4 +2275,12 @@ func makeACLSpecs(service *v1.Service, nodes []*v1.Node, frontend *scwlb.Fronten
 	}
 
 	return acls
+}
+
+func strip32SubnetMasks(subnets []string) []string {
+	stripped := make([]string, len(subnets))
+	for idx, subnet := range subnets {
+		stripped[idx] = strings.TrimSuffix(subnet, "/32")
+	}
+	return stripped
 }
