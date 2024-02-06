@@ -487,8 +487,8 @@ func (l *loadbalancers) getLoadbalancerByName(ctx context.Context, service *v1.S
 
 	var loadbalancer *scwlb.LB
 	resp, err := l.api.ListLBs(&scwlb.ZonedAPIListLBsRequest{
-		//Zone: Use default zone from SDK
 		Name: &name,
+		Zone: getLoadBalancerZone(service),
 	}, scw.WithAllPages())
 	if err != nil {
 		return nil, err
