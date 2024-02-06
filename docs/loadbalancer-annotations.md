@@ -162,3 +162,14 @@ The default value is 2.
 ### `service.beta.kubernetes.io/scw-loadbalancer-private`
 This is the annotation to configure the LB to be private or public
 The LB will be public if unset or false.
+
+### `service.beta.kubernetes.io/scw-loadbalancer-externally-managed`
+When set to `true`, this annotation makes the following changes in behavior:
+* Won't create/delete the LB.
+* Ignores the global configurations (such as size, private mode, IPs).
+* Won't detach private networks attached to the LB.
+* won't manage extra frontends and backends not starting with the service id.
+* Will refuse to manage a LB with a name starting with the cluster id.
+
+This annotation requires `service.beta.kubernetes.io/scw-loadbalancer-id` to be set to a valid existing LB.
+> Please note that this annotation is experimental and may not be supported.

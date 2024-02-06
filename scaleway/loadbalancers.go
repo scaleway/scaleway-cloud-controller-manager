@@ -18,9 +18,9 @@ package scaleway
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
-	"net/url"
 	"os"
 	"reflect"
 	"strconv"
@@ -28,7 +28,6 @@ import (
 	"time"
 
 	"golang.org/x/exp/slices"
-	"google.golang.org/protobuf/types/known/durationpb"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 
@@ -36,153 +35,6 @@ import (
 	scwlb "github.com/scaleway/scaleway-sdk-go/api/lb/v1"
 	scwvpc "github.com/scaleway/scaleway-sdk-go/api/vpc/v2"
 	"github.com/scaleway/scaleway-sdk-go/scw"
-	"github.com/scaleway/scaleway-sdk-go/validation"
-)
-
-const (
-	// serviceAnnotationLoadBalancerID is the ID of the loadbalancer
-	// It has the form <zone>/<lb-id>
-	serviceAnnotationLoadBalancerID = "service.beta.kubernetes.io/scw-loadbalancer-id"
-
-	// serviceAnnotationLoadBalancerForwardPortAlgorithm is the annotation to choose the load balancing algorithm
-	// The default value is "roundrobin" and the possible values are "roundrobin" or "leastconn"
-	serviceAnnotationLoadBalancerForwardPortAlgorithm = "service.beta.kubernetes.io/scw-loadbalancer-forward-port-algorithm"
-
-	// serviceAnnotationLoadBalancerStickySessions is the annotation to enable cookie-based session persistence
-	// The defaut value is "none" and the possible valuea are "none", "cookie", or "table"
-	// NB: If the value "cookie" is used, the annotation service.beta.kubernetes.io/scw-loadbalancer-sticky-sessions-cookie-name must be set
-	serviceAnnotationLoadBalancerStickySessions = "service.beta.kubernetes.io/scw-loadbalancer-sticky-sessions"
-
-	// serviceAnnotationLoadBalancerStickySessionsCookieName is the annotation for the cookie name for sticky sessions
-	// NB: muste be set if service.beta.kubernetes.io/scw-loadbalancer-sticky-sessions is set to "cookie"
-	serviceAnnotationLoadBalancerStickySessionsCookieName = "service.beta.kubernetes.io/scw-loadbalancer-sticky-sessions-cookie-name"
-
-	// serviceAnnotationLoadBalancerHealthCheckType is the type of health check used
-	// The default value is "tcp" and the possible values are "tcp", "http", "https", "mysql", "pgsql", "redis" or "ldap"
-	// It is possible to set the type per port, like "80:http;443,8443:https"
-	// NB: depending on the type, some other annotations are required, see below
-	serviceAnnotationLoadBalancerHealthCheckType = "service.beta.kubernetes.io/scw-loadbalancer-health-check-type"
-
-	// serviceAnnotationLoadBalancerHealthCheckDelay is the time between two consecutive health checks
-	// The default value is "5s". The duration are go's time.Duration (ex: "1s", "2m", "4h", ...)
-	serviceAnnotationLoadBalancerHealthCheckDelay = "service.beta.kubernetes.io/scw-loadbalancer-health-check-delay"
-
-	// serviceAnnotationLoadBalancerHealthTransientCheckDelay is the time between two consecutive health checks on transient state (going UP or DOWN)
-	// The default value is "0.5s". The duration are go's time.Duration (ex: "1s", "2m", "4h", ...)
-	serviceAnnotationLoadBalancerHealthTransientCheckDelay = "service.beta.kubernetes.io/scw-loadbalancer-health-transient-check-delay"
-
-	// serviceAnnotationLoadBalancerHealthCheckTimeout is the additional check timeout, after the connection has been already established
-	// The default value is "5s". The duration are go's time.Duration (ex: "1s", "2m", "4h", ...)
-	serviceAnnotationLoadBalancerHealthCheckTimeout = "service.beta.kubernetes.io/scw-loadbalancer-health-check-timeout"
-
-	// serviceAnnotationLoadBalancerHealthCheckMaxRetries is the number of consecutive unsuccessful health checks, after wich the server will be considered dead
-	// The default value is "5".
-	serviceAnnotationLoadBalancerHealthCheckMaxRetries = "service.beta.kubernetes.io/scw-loadbalancer-health-check-max-retries"
-
-	// serviceAnnotationLoadBalancerHealthCheckHTTPURI is the URI that is used by the "http" health check
-	// It is possible to set the uri per port, like "80:/;443,8443:mydomain.tld/healthz"
-	// NB: Required when setting service.beta.kubernetes.io/scw-loadbalancer-health-check-type to "http" or "https"
-	serviceAnnotationLoadBalancerHealthCheckHTTPURI = "service.beta.kubernetes.io/scw-loadbalancer-health-check-http-uri"
-
-	// serviceAnnotationLoadBalancerHealthCheckHTTPMethod is the HTTP method used by the "http" health check
-	// It is possible to set the method per port, like "80:GET;443,8443:POST"
-	// NB: Required when setting service.beta.kubernetes.io/scw-loadbalancer-health-check-type to "http" or "https"
-	serviceAnnotationLoadBalancerHealthCheckHTTPMethod = "service.beta.kubernetes.io/scw-loadbalancer-health-check-http-method"
-
-	// serviceAnnotationLoadBalancerHealthCheckHTTPCode is the HTTP code that the "http" health check will be matching against
-	// It is possible to set the code per port, like "80:404;443,8443:204"
-	// NB: Required when setting service.beta.kubernetes.io/scw-loadbalancer-health-check-type to "http" or "https"
-	serviceAnnotationLoadBalancerHealthCheckHTTPCode = "service.beta.kubernetes.io/scw-loadbalancer-health-check-http-code"
-
-	// serviceAnnotationLoadBalancerHealthCheckMysqlUser is the MySQL user used to check the MySQL connection when using the "mysql" health check
-	// It is possible to set the user per port, like "1234:root;3306,3307:mysql"
-	// NB: Required when setting service.beta.kubernetes.io/scw-loadbalancer-health-check-type to "mysql"
-	serviceAnnotationLoadBalancerHealthCheckMysqlUser = "service.beta.kubernetes.io/scw-loadbalancer-health-check-mysql-user"
-
-	// serviceAnnotationLoadBalancerHealthCheckPgsqlUser is the PgSQL user used to check the PgSQL connection when using the "pgsql" health check
-	// It is possible to set the user per port, like "1234:root;3306,3307:mysql"
-	// NB: Required when setting service.beta.kubernetes.io/scw-loadbalancer-health-check-type to "pgsql"
-	serviceAnnotationLoadBalancerHealthCheckPgsqlUser = "service.beta.kubernetes.io/scw-loadbalancer-health-check-pgsql-user"
-
-	// serviceAnnotationLoadBalancerSendProxyV2 is the annotation that enables PROXY protocol version 2 (must be supported by backend servers)
-	// The default value is "false" and the possible values are "false" or "true"
-	// or a comma delimited list of the service port on which to apply the proxy protocol (for instance "80,443")
-	// this field is DEPRECATED
-	serviceAnnotationLoadBalancerSendProxyV2 = "service.beta.kubernetes.io/scw-loadbalancer-send-proxy-v2"
-
-	// serviceAnnotationLoadBalancerProxyProtocolV1 is the annotation that can enable the PROXY protocol V1
-	// The possible values are "false", "true" or "*" for all ports or a comma delimited list of the service port
-	// (for instance "80,443")
-	serviceAnnotationLoadBalancerProxyProtocolV1 = "service.beta.kubernetes.io/scw-loadbalancer-proxy-protocol-v1"
-
-	// serviceAnnotationLoadBalancerProxyProtocolV2 is the annotation that can enable the PROXY protocol V2
-	// The possible values are "false", "true" or "*" for all ports or a comma delimited list of the service port
-	// (for instance "80,443")
-	serviceAnnotationLoadBalancerProxyProtocolV2 = "service.beta.kubernetes.io/scw-loadbalancer-proxy-protocol-v2"
-
-	// serviceAnnotationLoadBalancerType is the load balancer offer type
-	serviceAnnotationLoadBalancerType = "service.beta.kubernetes.io/scw-loadbalancer-type"
-
-	// serviceAnnotationLoadBalancerZone is the zone to create the load balancer
-	serviceAnnotationLoadBalancerZone = "service.beta.kubernetes.io/scw-loadbalancer-zone"
-
-	// serviceAnnotationLoadBalancerTimeoutClient is the maximum client connection inactivity time
-	// The default value is "10m". The duration are go's time.Duration (ex: "1s", "2m", "4h", ...)
-	serviceAnnotationLoadBalancerTimeoutClient = "service.beta.kubernetes.io/scw-loadbalancer-timeout-client"
-
-	// serviceAnnotationLoadBalancerTimeoutServer is the maximum server connection inactivity time
-	// The default value is "10s". The duration are go's time.Duration (ex: "1s", "2m", "4h", ...)
-	serviceAnnotationLoadBalancerTimeoutServer = "service.beta.kubernetes.io/scw-loadbalancer-timeout-server"
-
-	// serviceAnnotationLoadBalancerTimeoutConnect is the maximum initical server connection establishment time
-	// The default value is "10m". The duration are go's time.Duration (ex: "1s", "2m", "4h", ...)
-	serviceAnnotationLoadBalancerTimeoutConnect = "service.beta.kubernetes.io/scw-loadbalancer-timeout-connect"
-
-	// serviceAnnotationLoadBalancerTimeoutTunnel is the maximum tunnel inactivity time
-	// The default value is "10m". The duration are go's time.Duration (ex: "1s", "2m", "4h", ...)
-	serviceAnnotationLoadBalancerTimeoutTunnel = "service.beta.kubernetes.io/scw-loadbalancer-timeout-tunnel"
-
-	// serviceAnnotationLoadBalancerOnMarkedDownAction is the annotation that modifes what occurs when a backend server is marked down
-	// The default value is "on_marked_down_action_none" and the possible values are "on_marked_down_action_none" and "shutdown_sessions"
-	serviceAnnotationLoadBalancerOnMarkedDownAction = "service.beta.kubernetes.io/scw-loadbalancer-on-marked-down-action"
-
-	// serviceAnnotationLoadBalancerForceInternalIP is the annotation that force the usage of InternalIP inside the loadbalancer
-	// Normally, the cloud controller manager use ExternalIP to be nodes region-free (or public InternalIP in case of Baremetal).
-	serviceAnnotationLoadBalancerForceInternalIP = "service.beta.kubernetes.io/scw-loadbalancer-force-internal-ip"
-
-	// serviceAnnotationLoadBalancerUseHostname is the annotation that force the use of the LB hostname instead of the public IP.
-	// This is useful when it is needed to not bypass the LoadBalacer for traffic coming from the cluster
-	serviceAnnotationLoadBalancerUseHostname = "service.beta.kubernetes.io/scw-loadbalancer-use-hostname"
-
-	// serviceAnnotationLoadBalancerProtocolHTTP is the annotation to set the forward protocol of the LB to HTTP
-	// The possible values are "false", "true" or "*" for all ports or a comma delimited list of the service port
-	// (for instance "80,443")
-	serviceAnnotationLoadBalancerProtocolHTTP = "service.beta.kubernetes.io/scw-loadbalancer-protocol-http"
-
-	// serviceAnnotationLoadBalancerCertificateIDs is the annotation to choose the certificate IDS to associate
-	// with this LoadBalancer.
-	// The possible format are:
-	// "<certificate-id>": will use this certificate for all frontends
-	// "<certificate-id>,<certificate-id>" will use these certificates for all frontends
-	// "<port1>:<certificate1-id>,<certificate2-id>;<port2>,<port3>:<certificate3-id>" will use certificate 1 and 2 for frontend with port port1
-	// and certificate3 for frotend with port port2 and port3
-	serviceAnnotationLoadBalancerCertificateIDs = "service.beta.kubernetes.io/scw-loadbalancer-certificate-ids"
-
-	// serviceAnnotationLoadBalancerTargetNodeLabels is the annotation to target nodes with specific label(s)
-	// Expected format: "Key1=Val1,Key2=Val2"
-	serviceAnnotationLoadBalancerTargetNodeLabels = "service.beta.kubernetes.io/scw-loadbalancer-target-node-labels"
-
-	// serviceAnnotationLoadBalancerRedispatchAttemptCount is the annotation to activate redispatch on another backend server in case of failure
-	// The default value is "0", which disable the redispatch
-	serviceAnnotationLoadBalancerRedispatchAttemptCount = "service.beta.kubernetes.io/scw-loadbalancer-redispatch-attempt-count"
-
-	// serviceAnnotationLoadBalancerMaxRetries is the annotation to configure the number of retry on connection failure
-	// The default value is 3.
-	serviceAnnotationLoadBalancerMaxRetries = "service.beta.kubernetes.io/scw-loadbalancer-max-retries"
-
-	// serviceAnnotationLoadBalancerPrivate is the annotation to configure the LB to be private or public
-	// The LB will be public if unset or false.
-	serviceAnnotationLoadBalancerPrivate = "service.beta.kubernetes.io/scw-loadbalancer-private"
 )
 
 const MaxEntriesPerACL = 60
@@ -288,6 +140,12 @@ func (l *loadbalancers) EnsureLoadBalancer(ctx context.Context, clusterName stri
 		return nil, fmt.Errorf("scaleway-cloud-controller-manager cannot handle loadBalancerClass %s", *service.Spec.LoadBalancerClass)
 	}
 
+	lbExternallyManaged, err := svcExternallyManaged(service)
+	if err != nil {
+		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerExternallyManaged)
+		return nil, fmt.Errorf("invalid value for annotation %s: expected boolean", serviceAnnotationLoadBalancerExternallyManaged)
+	}
+
 	lbPrivate, err := svcPrivate(service)
 	if err != nil {
 		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerPrivate)
@@ -312,22 +170,24 @@ func (l *loadbalancers) EnsureLoadBalancer(ctx context.Context, clusterName stri
 			return nil, err
 		}
 	default:
-		// any kind of Error
+		// any other kind of Error
 		klog.Errorf("error getting loadbalancer for service %s/%s: %v", service.Namespace, service.Name, err)
 		return nil, err
 	}
 
-	privateModeMismatch := lbPrivate != (len(lb.IP) == 0)
-	reservedIPMismatch := service.Spec.LoadBalancerIP != "" && service.Spec.LoadBalancerIP != lb.IP[0].IPAddress
-	if privateModeMismatch || reservedIPMismatch {
-		err = l.deleteLoadBalancer(ctx, lb, service)
-		if err != nil {
-			return nil, err
-		}
+	if !lbExternallyManaged {
+		privateModeMismatch := lbPrivate != (len(lb.IP) == 0)
+		reservedIPMismatch := service.Spec.LoadBalancerIP != "" && service.Spec.LoadBalancerIP != lb.IP[0].IPAddress
+		if privateModeMismatch || reservedIPMismatch {
+			err = l.deleteLoadBalancer(ctx, lb, clusterName, service)
+			if err != nil {
+				return nil, err
+			}
 
-		lb, err = l.createLoadBalancer(ctx, clusterName, service)
-		if err != nil {
-			return nil, err
+			lb, err = l.createLoadBalancer(ctx, clusterName, service)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -394,17 +254,76 @@ func (l *loadbalancers) EnsureLoadBalancerDeleted(ctx context.Context, clusterNa
 		return err
 	}
 
-	return l.deleteLoadBalancer(ctx, lb, service)
+	lbExternallyManaged, err := svcExternallyManaged(service)
+	if err != nil {
+		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerExternallyManaged)
+		return fmt.Errorf("invalid value for annotation %s: expected boolean", serviceAnnotationLoadBalancerExternallyManaged)
+	}
+
+	if lbExternallyManaged {
+		return l.removeExternallyManagedResources(ctx, lb, service)
+	}
+
+	return l.deleteLoadBalancer(ctx, lb, clusterName, service)
 }
 
-func (l *loadbalancers) deleteLoadBalancer(ctx context.Context, lb *scwlb.LB, service *v1.Service) error {
+func (l *loadbalancers) removeExternallyManagedResources(ctx context.Context, lb *scwlb.LB, service *v1.Service) error {
+	prefixFilter := fmt.Sprintf("%s_", string(service.UID))
+
+	// List all frontends associated with the LB
+	respFrontends, err := l.api.ListFrontends(&scwlb.ZonedAPIListFrontendsRequest{
+		Name: &prefixFilter,
+		Zone: lb.Zone,
+		LBID: lb.ID,
+	}, scw.WithAllPages())
+	if err != nil {
+		return fmt.Errorf("error listing frontends for load balancer %s: %v", lb.ID, err)
+	}
+
+	// List all backends associated with the LB
+	respBackends, err := l.api.ListBackends(&scwlb.ZonedAPIListBackendsRequest{
+		Name: &prefixFilter,
+		Zone: lb.Zone,
+		LBID: lb.ID,
+	}, scw.WithAllPages())
+	if err != nil {
+		return fmt.Errorf("error listing backend for load balancer %s: %v", lb.ID, err)
+	}
+
+	// Remove extra frontends
+	for _, f := range respFrontends.Frontends {
+		klog.V(3).Infof("deleting frontend: %s port: %d loadbalancer: %s", f.ID, f.InboundPort, lb.ID)
+		if err := l.api.DeleteFrontend(&scwlb.ZonedAPIDeleteFrontendRequest{
+			Zone:       lb.Zone,
+			FrontendID: f.ID,
+		}); err != nil {
+			return fmt.Errorf("failed deleting frontend: %s port: %d loadbalancer: %s err: %v", f.ID, f.InboundPort, lb.ID, err)
+		}
+	}
+
+	// Remove extra backends
+	for _, b := range respBackends.Backends {
+		klog.V(3).Infof("deleting backend: %s port: %d loadbalancer: %s", b.ID, b.ForwardPort, lb.ID)
+		if err := l.api.DeleteBackend(&scwlb.ZonedAPIDeleteBackendRequest{
+			Zone:      lb.Zone,
+			BackendID: b.ID,
+		}); err != nil {
+			return fmt.Errorf("failed deleting backend: %s port: %d loadbalancer: %s err: %v", b.ID, b.ForwardPort, lb.ID, err)
+		}
+	}
+
+	return nil
+}
+
+func (l *loadbalancers) deleteLoadBalancer(ctx context.Context, lb *scwlb.LB, clusterName string, service *v1.Service) error {
 	// remove loadbalancer annotation
 	if err := l.unannotateAndPatch(service); err != nil {
 		return err
 	}
 
 	// if loadbalancer is renamed, do not delete it.
-	if lb.Name != l.GetLoadBalancerName(ctx, "", service) {
+	if lb.Name != l.GetLoadBalancerName(ctx, clusterName, service) {
+		klog.Warningf("load balancer for service %s/%s was renamed, not removing", service.Namespace, service.Name)
 		return nil
 	}
 
@@ -419,8 +338,8 @@ func (l *loadbalancers) deleteLoadBalancer(ctx context.Context, lb *scwlb.LB, se
 
 	err := l.api.DeleteLB(request)
 	if err != nil {
-		klog.Errorf("error deleting load balancer %s: %v", lb.ID, err)
-		return fmt.Errorf("error deleting load balancer %s: %v", lb.ID, err)
+		klog.Errorf("error deleting load balancer %s for service %s/%s: %v", lb.ID, service.Namespace, service.Name, err)
+		return fmt.Errorf("error deleting load balancer %s for service %s/%s: %v", lb.ID, service.Namespace, service.Name, err)
 	}
 
 	return nil
@@ -458,11 +377,22 @@ func extractNodesInternalIps(nodes []*v1.Node) []string {
 }
 
 func (l *loadbalancers) fetchLoadBalancer(ctx context.Context, clusterName string, service *v1.Service) (*scwlb.LB, error) {
-	if zone, loadBalancerID, err := getLoadBalancerID(service); loadBalancerID != "" {
-		if err != nil {
-			return nil, err
-		}
+	lbExternallyManaged, err := svcExternallyManaged(service)
+	if err != nil {
+		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerExternallyManaged)
+		return nil, fmt.Errorf("invalid value for annotation %s: %v", serviceAnnotationLoadBalancerExternallyManaged, err)
+	}
 
+	zone, loadBalancerID, err := getLoadBalancerID(service)
+	if err != nil && !errors.Is(err, errLoadBalancerInvalidAnnotation) {
+		return nil, err
+	}
+
+	if lbExternallyManaged && loadBalancerID == "" {
+		return nil, fmt.Errorf("loadbalancer id must be defined for externally managed loadbalancer for service %s/%s", service.Namespace, service.Name)
+	}
+
+	if loadBalancerID != "" {
 		resp, err := l.api.GetLB(&scwlb.ZonedAPIGetLBRequest{
 			LBID: loadBalancerID,
 			Zone: zone,
@@ -475,15 +405,20 @@ func (l *loadbalancers) fetchLoadBalancer(ctx context.Context, clusterName strin
 			return nil, err
 		}
 
+		if lbExternallyManaged && strings.HasPrefix(resp.Name, os.Getenv(scwCcmPrefixEnv)) {
+			klog.Errorf("externally managed loadbalancer must not be prefixed by the cluster id")
+			return nil, fmt.Errorf("externally managed loadbalancer must not be prefixed by the cluster id")
+		}
+
 		return resp, nil
 	}
 
-	// fetch LoadBalancer by using name.
-	return l.getLoadbalancerByName(ctx, service)
+	// fallback to fetching LoadBalancer by name
+	return l.getLoadbalancerByName(ctx, clusterName, service)
 }
 
-func (l *loadbalancers) getLoadbalancerByName(ctx context.Context, service *v1.Service) (*scwlb.LB, error) {
-	name := l.GetLoadBalancerName(ctx, "", service)
+func (l *loadbalancers) getLoadbalancerByName(ctx context.Context, clusterName string, service *v1.Service) (*scwlb.LB, error) {
+	name := l.GetLoadBalancerName(ctx, clusterName, service)
 
 	var loadbalancer *scwlb.LB
 	resp, err := l.api.ListLBs(&scwlb.ZonedAPIListLBsRequest{
@@ -519,9 +454,14 @@ func (l *loadbalancers) getLoadbalancerByName(ctx context.Context, service *v1.S
 }
 
 func (l *loadbalancers) createLoadBalancer(ctx context.Context, clusterName string, service *v1.Service) (*scwlb.LB, error) {
-	scwCcmTagsDelimiter := os.Getenv(scwCcmTagsDelimiterEnv)
-	if scwCcmTagsDelimiter == "" {
-		scwCcmTagsDelimiter = ","
+	// ExternallyManaged LB
+	lbExternallyManaged, err := svcExternallyManaged(service)
+	if err != nil {
+		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerExternallyManaged)
+		return nil, fmt.Errorf("invalid value for annotation %s: expected boolean", serviceAnnotationLoadBalancerExternallyManaged)
+	}
+	if lbExternallyManaged {
+		return nil, fmt.Errorf("cannot create an externally managed load balancer, please provide an existing load balancer instead")
 	}
 
 	lbPrivate, err := svcPrivate(service)
@@ -530,6 +470,7 @@ func (l *loadbalancers) createLoadBalancer(ctx context.Context, clusterName stri
 		return nil, fmt.Errorf("invalid value for annotation %s: expected boolean", serviceAnnotationLoadBalancerPrivate)
 	}
 
+	// Attach specific IP if set
 	var ipID *string
 	if !lbPrivate && service.Spec.LoadBalancerIP != "" {
 		request := scwlb.ZonedAPIListIPsRequest{
@@ -553,18 +494,21 @@ func (l *loadbalancers) createLoadBalancer(ctx context.Context, clusterName stri
 		ipID = &ipsResp.IPs[0].ID
 	}
 
+	lbName := l.GetLoadBalancerName(ctx, clusterName, service)
+	lbType := getLoadBalancerType(service)
+	if lbType == "" {
+		lbType = l.defaultLBType
+	}
+	scwCcmTagsDelimiter := os.Getenv(scwCcmTagsDelimiterEnv)
+	if scwCcmTagsDelimiter == "" {
+		scwCcmTagsDelimiter = ","
+	}
 	scwCcmTags := os.Getenv(scwCcmTagsEnv)
 	tags := []string{}
 	if scwCcmTags != "" {
 		tags = strings.Split(scwCcmTags, scwCcmTagsDelimiter)
 	}
 	tags = append(tags, "managed-by-scaleway-cloud-controller-manager")
-	lbName := l.GetLoadBalancerName(ctx, clusterName, service)
-
-	lbType := getLoadBalancerType(service)
-	if lbType == "" {
-		lbType = l.defaultLBType
-	}
 
 	request := scwlb.ZonedAPICreateLBRequest{
 		Zone:             getLoadBalancerZone(service),
@@ -575,14 +519,13 @@ func (l *loadbalancers) createLoadBalancer(ctx context.Context, clusterName stri
 		Type:             lbType,
 		AssignFlexibleIP: scw.BoolPtr(!lbPrivate),
 	}
-
 	lb, err := l.api.CreateLB(&request)
 	if err != nil {
 		klog.Errorf("error creating load balancer for service %s/%s: %v", service.Namespace, service.Name, err)
 		return nil, fmt.Errorf("error creating load balancer for service %s/%s: %v", service.Namespace, service.Name, err)
 	}
 
-	// annotate newly created loadBalancer
+	// annotate newly created load balancer
 	if err := l.annotateAndPatch(service, lb); err != nil {
 		return nil, err
 	}
@@ -590,6 +533,7 @@ func (l *loadbalancers) createLoadBalancer(ctx context.Context, clusterName stri
 	return lb, nil
 }
 
+// annotateAndPatch adds the loadbalancer id to the service's annotations
 func (l *loadbalancers) annotateAndPatch(service *v1.Service, loadbalancer *scwlb.LB) error {
 	service = service.DeepCopy()
 	patcher := NewServicePatcher(l.client.kubernetes, service)
@@ -602,6 +546,7 @@ func (l *loadbalancers) annotateAndPatch(service *v1.Service, loadbalancer *scwl
 	return patcher.Patch()
 }
 
+// unannotateAndPatch removes the loadbalancer id from the service's annotations
 func (l *loadbalancers) unannotateAndPatch(service *v1.Service) error {
 	service = service.DeepCopy()
 	patcher := NewServicePatcher(l.client.kubernetes, service)
@@ -613,7 +558,14 @@ func (l *loadbalancers) unannotateAndPatch(service *v1.Service) error {
 	return patcher.Patch()
 }
 
+// updateLoadBalancer updates the loadbalancer's resources
 func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *scwlb.LB, service *v1.Service, nodes []*v1.Node) error {
+	lbExternallyManaged, err := svcExternallyManaged(service)
+	if err != nil {
+		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerExternallyManaged)
+		return fmt.Errorf("invalid value for annotation %s: expected boolean", serviceAnnotationLoadBalancerExternallyManaged)
+	}
+
 	nodes = filterNodes(service, nodes)
 	if l.pnID != "" {
 		respPN, err := l.api.ListLBPrivateNetworks(&scwlb.ZonedAPIListLBPrivateNetworksRequest{
@@ -632,14 +584,16 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 			}
 
 			// this PN should not be attached to this loadbalancer
-			klog.V(3).Infof("detach extra private network %s from load balancer %s", pNIC.PrivateNetworkID, loadbalancer.ID)
-			err = l.api.DetachPrivateNetwork(&scwlb.ZonedAPIDetachPrivateNetworkRequest{
-				Zone:             loadbalancer.Zone,
-				LBID:             loadbalancer.ID,
-				PrivateNetworkID: pNIC.PrivateNetworkID,
-			})
-			if err != nil {
-				return fmt.Errorf("unable to detach unmatched private network %s from %s: %v", pNIC.PrivateNetworkID, loadbalancer.ID, err)
+			if !lbExternallyManaged {
+				klog.V(3).Infof("detach extra private network %s from load balancer %s", pNIC.PrivateNetworkID, loadbalancer.ID)
+				err = l.api.DetachPrivateNetwork(&scwlb.ZonedAPIDetachPrivateNetworkRequest{
+					Zone:             loadbalancer.Zone,
+					LBID:             loadbalancer.ID,
+					PrivateNetworkID: pNIC.PrivateNetworkID,
+				})
+				if err != nil {
+					return fmt.Errorf("unable to detach unmatched private network %s from %s: %v", pNIC.PrivateNetworkID, loadbalancer.ID, err)
+				}
 			}
 		}
 
@@ -689,8 +643,13 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 		return fmt.Errorf("failed to convert service to frontend and backends on loadbalancer %s: %v", loadbalancer.ID, err)
 	}
 
-	frontendsOps := compareFrontends(respFrontends.Frontends, svcFrontends)
-	backendsOps := compareBackends(respBackends.Backends, svcBackends)
+	prefixFilter := ""
+	if lbExternallyManaged {
+		prefixFilter = fmt.Sprintf("%s_", string(service.UID))
+	}
+
+	frontendsOps := compareFrontends(respFrontends.Frontends, svcFrontends, prefixFilter)
+	backendsOps := compareBackends(respBackends.Backends, svcBackends, prefixFilter)
 
 	// Remove extra frontends
 	for _, f := range frontendsOps.remove {
@@ -820,16 +779,18 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 		}
 	}
 
-	loadBalancerType := getLoadBalancerType(service)
-	if loadBalancerType != "" && strings.ToLower(loadbalancer.Type) != loadBalancerType {
-		_, err := l.api.MigrateLB(&scwlb.ZonedAPIMigrateLBRequest{
-			Zone: loadbalancer.Zone,
-			LBID: loadbalancer.ID,
-			Type: loadBalancerType,
-		})
-		if err != nil {
-			klog.Errorf("error updating load balancer %s: %v", loadbalancer.ID, err)
-			return fmt.Errorf("error updating load balancer %s: %v", loadbalancer.ID, err)
+	if !lbExternallyManaged {
+		loadBalancerType := getLoadBalancerType(service)
+		if loadBalancerType != "" && strings.ToLower(loadbalancer.Type) != loadBalancerType {
+			_, err := l.api.MigrateLB(&scwlb.ZonedAPIMigrateLBRequest{
+				Zone: loadbalancer.Zone,
+				LBID: loadbalancer.ID,
+				Type: loadBalancerType,
+			})
+			if err != nil {
+				klog.Errorf("error updating load balancer %s: %v", loadbalancer.ID, err)
+				return fmt.Errorf("error updating load balancer %s: %v", loadbalancer.ID, err)
+			}
 		}
 	}
 
@@ -839,12 +800,12 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 // createPrivateServiceStatus creates a LoadBalancer status for services with private load balancers
 func (l *loadbalancers) createPrivateServiceStatus(service *v1.Service, lb *scwlb.LB) (*v1.LoadBalancerStatus, error) {
 	if l.pnID == "" {
-		return nil, fmt.Errorf("cannot make status for service %s/%s: private load balancer requires a private network", service.Namespace, service.Name)
+		return nil, fmt.Errorf("cannot create a status for service %s/%s: a private load balancer requires a private network", service.Namespace, service.Name)
 	}
 
 	region, err := lb.Zone.Region()
 	if err != nil {
-		return nil, fmt.Errorf("error making status for service %s/%s: %v", service.Namespace, service.Name, err)
+		return nil, fmt.Errorf("error creating status for service %s/%s: %v", service.Namespace, service.Name, err)
 	}
 
 	status := &v1.LoadBalancerStatus{}
@@ -855,7 +816,7 @@ func (l *loadbalancers) createPrivateServiceStatus(service *v1.Service, lb *scwl
 			PrivateNetworkID: l.pnID,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("unable to query private network for lb %s: %v", lb.Name, err)
+			return nil, fmt.Errorf("unable to query private network for lb %s for service %s/%s: %v", lb.ID, service.Namespace, service.Name, err)
 		}
 
 		status.Ingress = []v1.LoadBalancerIngress{
@@ -872,11 +833,11 @@ func (l *loadbalancers) createPrivateServiceStatus(service *v1.Service, lb *scwl
 			Region:       region,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("unable to query ipam for lb %s: %v", lb.Name, err)
+			return nil, fmt.Errorf("unable to query ipam for lb %s for service %s/%s: %v", lb.ID, service.Namespace, service.Name, err)
 		}
 
 		if len(ipamRes.IPs) == 0 {
-			return nil, fmt.Errorf("no private network ip for lb %s", lb.Name)
+			return nil, fmt.Errorf("no private network ip for lb %s for service %s/%s", lb.ID, service.Namespace, service.Name)
 		}
 
 		status.Ingress = make([]v1.LoadBalancerIngress, len(ipamRes.IPs))
@@ -927,106 +888,6 @@ func (l *loadbalancers) createServiceStatus(service *v1.Service, lb *scwlb.LB) (
 	return l.createPublicServiceStatus(service, lb)
 }
 
-func getLoadBalancerID(service *v1.Service) (scw.Zone, string, error) {
-	annoLoadBalancerID, ok := service.Annotations[serviceAnnotationLoadBalancerID]
-	if !ok {
-		return "", "", errLoadBalancerInvalidAnnotation
-	}
-
-	splitLoadBalancerID := strings.Split(strings.ToLower(annoLoadBalancerID), "/")
-	if len(splitLoadBalancerID) != 2 {
-		return "", "", errLoadBalancerInvalidLoadBalancerID
-	}
-
-	if validation.IsRegion(splitLoadBalancerID[0]) {
-		zone := splitLoadBalancerID[0] + "-1"
-		return scw.Zone(zone), splitLoadBalancerID[1], nil
-	}
-
-	return scw.Zone(splitLoadBalancerID[0]), splitLoadBalancerID[1], nil
-}
-
-func getForwardPortAlgorithm(service *v1.Service) (scwlb.ForwardPortAlgorithm, error) {
-	forwardPortAlgorithm, ok := service.Annotations[serviceAnnotationLoadBalancerForwardPortAlgorithm]
-	if !ok {
-		return scwlb.ForwardPortAlgorithmRoundrobin, nil
-	}
-
-	forwardPortAlgorithmValue := scwlb.ForwardPortAlgorithm(forwardPortAlgorithm)
-
-	if forwardPortAlgorithmValue != scwlb.ForwardPortAlgorithmRoundrobin && forwardPortAlgorithmValue != scwlb.ForwardPortAlgorithmLeastconn && forwardPortAlgorithmValue != scwlb.ForwardPortAlgorithmFirst {
-		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerForwardPortAlgorithm)
-		return "", errLoadBalancerInvalidAnnotation
-	}
-
-	return forwardPortAlgorithmValue, nil
-}
-
-func getStickySessions(service *v1.Service) (scwlb.StickySessionsType, error) {
-	stickySessions, ok := service.Annotations[serviceAnnotationLoadBalancerStickySessions]
-	if !ok {
-		return scwlb.StickySessionsTypeNone, nil
-	}
-
-	stickySessionsValue := scwlb.StickySessionsType(stickySessions)
-
-	if stickySessionsValue != scwlb.StickySessionsTypeNone && stickySessionsValue != scwlb.StickySessionsTypeCookie && stickySessionsValue != scwlb.StickySessionsTypeTable {
-		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerStickySessions)
-		return "", errLoadBalancerInvalidAnnotation
-	}
-
-	return stickySessionsValue, nil
-}
-
-func getStickySessionsCookieName(service *v1.Service) (string, error) {
-	stickySessionsCookieName, ok := service.Annotations[serviceAnnotationLoadBalancerStickySessionsCookieName]
-	if !ok {
-		return "", nil
-	}
-
-	return stickySessionsCookieName, nil
-}
-
-func getSendProxyV2(service *v1.Service, nodePort int32) (scwlb.ProxyProtocol, error) {
-	sendProxyV2, ok := service.Annotations[serviceAnnotationLoadBalancerSendProxyV2]
-	if !ok {
-		return scwlb.ProxyProtocolProxyProtocolNone, nil
-	}
-
-	sendProxyV2Value, err := strconv.ParseBool(sendProxyV2)
-	if err != nil {
-		var svcPort int32 = -1
-		for _, p := range service.Spec.Ports {
-			if p.NodePort == nodePort {
-				svcPort = p.Port
-			}
-		}
-		if svcPort == -1 {
-			klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerSendProxyV2)
-			return "", errLoadBalancerInvalidAnnotation
-		}
-
-		ports := strings.Split(strings.ReplaceAll(sendProxyV2, " ", ""), ",")
-		for _, port := range ports {
-			intPort, err := strconv.ParseInt(port, 0, 64)
-			if err != nil {
-				klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerSendProxyV2)
-				return "", errLoadBalancerInvalidAnnotation
-			}
-			if int64(svcPort) == intPort {
-				return scwlb.ProxyProtocolProxyProtocolV2, nil
-			}
-		}
-		return scwlb.ProxyProtocolProxyProtocolNone, nil
-	}
-
-	if sendProxyV2Value {
-		return scwlb.ProxyProtocolProxyProtocolV2, nil
-	}
-
-	return scwlb.ProxyProtocolProxyProtocolNone, nil
-}
-
 func isPortInRange(r string, p int32) (bool, error) {
 	boolValue, err := strconv.ParseBool(r)
 	if err == nil && r != "1" && r != "0" {
@@ -1051,557 +912,9 @@ func isPortInRange(r string, p int32) (bool, error) {
 	return false, nil
 }
 
-func getLoadBalancerType(service *v1.Service) string {
-	return strings.ToLower(service.Annotations[serviceAnnotationLoadBalancerType])
-}
-
-func getLoadBalancerZone(service *v1.Service) scw.Zone {
-	return scw.Zone(strings.ToLower(service.Annotations[serviceAnnotationLoadBalancerZone]))
-}
-
-func getProxyProtocol(service *v1.Service, nodePort int32) (scwlb.ProxyProtocol, error) {
-	proxyProtocolV1 := service.Annotations[serviceAnnotationLoadBalancerProxyProtocolV1]
-	proxyProtocolV2 := service.Annotations[serviceAnnotationLoadBalancerProxyProtocolV2]
-
-	var svcPort int32 = -1
-	for _, p := range service.Spec.Ports {
-		if p.NodePort == nodePort {
-			svcPort = p.Port
-		}
-	}
-	if svcPort == -1 {
-		klog.Errorf("no valid port found")
-		return "", errLoadBalancerInvalidAnnotation
-	}
-
-	isV1, err := isPortInRange(proxyProtocolV1, svcPort)
-	if err != nil {
-		klog.Errorf("unable to check if port %d is in range %s", svcPort, proxyProtocolV1)
-		return "", err
-	}
-	isV2, err := isPortInRange(proxyProtocolV2, svcPort)
-	if err != nil {
-		klog.Errorf("unable to check if port %d is in range %s", svcPort, proxyProtocolV2)
-		return "", err
-	}
-
-	if isV1 && isV2 {
-		klog.Errorf("port %d is in both v1 and v2 proxy protocols", svcPort)
-		return "", fmt.Errorf("port %d is in both v1 and v2 proxy protocols", svcPort)
-	}
-
-	if isV1 {
-		return scwlb.ProxyProtocolProxyProtocolV1, nil
-	}
-	if isV2 {
-		return scwlb.ProxyProtocolProxyProtocolV2, nil
-	}
-
-	return getSendProxyV2(service, nodePort)
-}
-
-func getTimeoutClient(service *v1.Service) (time.Duration, error) {
-	timeoutClient, ok := service.Annotations[serviceAnnotationLoadBalancerTimeoutClient]
-	if !ok {
-		return time.ParseDuration("10m")
-	}
-
-	timeoutClientDuration, err := time.ParseDuration(timeoutClient)
-	if err != nil {
-		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerTimeoutClient)
-		return time.Duration(0), errLoadBalancerInvalidAnnotation
-	}
-
-	return timeoutClientDuration, nil
-}
-
-func getTimeoutServer(service *v1.Service) (time.Duration, error) {
-	timeoutServer, ok := service.Annotations[serviceAnnotationLoadBalancerTimeoutServer]
-	if !ok {
-		return time.ParseDuration("10s")
-	}
-
-	timeoutServerDuration, err := time.ParseDuration(timeoutServer)
-	if err != nil {
-		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerTimeoutServer)
-		return time.Duration(0), errLoadBalancerInvalidAnnotation
-	}
-
-	return timeoutServerDuration, nil
-}
-
-func getTimeoutConnect(service *v1.Service) (time.Duration, error) {
-	timeoutConnect, ok := service.Annotations[serviceAnnotationLoadBalancerTimeoutConnect]
-	if !ok {
-		return time.ParseDuration("10m")
-	}
-
-	timeoutConnectDuration, err := time.ParseDuration(timeoutConnect)
-	if err != nil {
-		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerTimeoutConnect)
-		return time.Duration(0), errLoadBalancerInvalidAnnotation
-	}
-
-	return timeoutConnectDuration, nil
-}
-
-func getTimeoutTunnel(service *v1.Service) (time.Duration, error) {
-	timeoutTunnel, ok := service.Annotations[serviceAnnotationLoadBalancerTimeoutTunnel]
-	if !ok {
-		return time.ParseDuration("10m")
-	}
-
-	timeoutTunnelDuration, err := time.ParseDuration(timeoutTunnel)
-	if err != nil {
-		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerTimeoutTunnel)
-		return time.Duration(0), errLoadBalancerInvalidAnnotation
-	}
-
-	return timeoutTunnelDuration, nil
-}
-
-func getOnMarkedDownAction(service *v1.Service) (scwlb.OnMarkedDownAction, error) {
-	onMarkedDownAction, ok := service.Annotations[serviceAnnotationLoadBalancerOnMarkedDownAction]
-	if !ok {
-		return scwlb.OnMarkedDownActionOnMarkedDownActionNone, nil
-	}
-
-	onMarkedDownActionValue := scwlb.OnMarkedDownAction(onMarkedDownAction)
-
-	if onMarkedDownActionValue != scwlb.OnMarkedDownActionOnMarkedDownActionNone && onMarkedDownActionValue != scwlb.OnMarkedDownActionShutdownSessions {
-		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerOnMarkedDownAction)
-		return "", errLoadBalancerInvalidAnnotation
-	}
-
-	return onMarkedDownActionValue, nil
-}
-
-func getRedisatchAttemptCount(service *v1.Service) (*int32, error) {
-	redispatchAttemptCount, ok := service.Annotations[serviceAnnotationLoadBalancerRedispatchAttemptCount]
-	if !ok {
-		var v int32 = 0
-		return &v, nil
-	}
-	redispatchAttemptCountInt, err := strconv.Atoi(redispatchAttemptCount)
-	if err != nil {
-		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerRedispatchAttemptCount)
-		return nil, errLoadBalancerInvalidAnnotation
-
-	}
-	redispatchAttemptCountInt32 := int32(redispatchAttemptCountInt)
-	return &redispatchAttemptCountInt32, nil
-}
-
-func getMaxRetries(service *v1.Service) (*int32, error) {
-	maxRetriesCount, ok := service.Annotations[serviceAnnotationLoadBalancerMaxRetries]
-	if !ok {
-		var v int32 = 3
-		return &v, nil
-	}
-	maxRetriesCountInt, err := strconv.Atoi(maxRetriesCount)
-	if err != nil {
-		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerMaxRetries)
-		return nil, errLoadBalancerInvalidAnnotation
-
-	}
-	maxRetriesCountInt32 := int32(maxRetriesCountInt)
-	return &maxRetriesCountInt32, nil
-}
-
-func getHealthCheckDelay(service *v1.Service) (time.Duration, error) {
-	healthCheckDelay, ok := service.Annotations[serviceAnnotationLoadBalancerHealthCheckDelay]
-	if !ok {
-		return time.ParseDuration("5s")
-	}
-
-	healthCheckDelayDuration, err := time.ParseDuration(healthCheckDelay)
-	if err != nil {
-		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerHealthCheckDelay)
-		return time.Duration(0), errLoadBalancerInvalidAnnotation
-	}
-
-	return healthCheckDelayDuration, nil
-}
-
-func getHealthCheckTimeout(service *v1.Service) (time.Duration, error) {
-	healthCheckTimeout, ok := service.Annotations[serviceAnnotationLoadBalancerHealthCheckTimeout]
-	if !ok {
-		return time.ParseDuration("5s")
-	}
-
-	healthCheckTimeoutDuration, err := time.ParseDuration(healthCheckTimeout)
-	if err != nil {
-		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerHealthCheckTimeout)
-		return time.Duration(0), errLoadBalancerInvalidAnnotation
-	}
-
-	return healthCheckTimeoutDuration, nil
-}
-
-func getHealthCheckMaxRetries(service *v1.Service) (int32, error) {
-	healthCheckMaxRetries, ok := service.Annotations[serviceAnnotationLoadBalancerHealthCheckMaxRetries]
-	if !ok {
-		return 5, nil
-	}
-
-	healthCheckMaxRetriesInt, err := strconv.Atoi(healthCheckMaxRetries)
-	if err != nil {
-		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerHealthCheckMaxRetries)
-		return 0, errLoadBalancerInvalidAnnotation
-	}
-
-	return int32(healthCheckMaxRetriesInt), nil
-}
-
-func getHealthCheckTransientCheckDelay(service *v1.Service) (*scw.Duration, error) {
-	transientCheckDelay, ok := service.Annotations[serviceAnnotationLoadBalancerHealthTransientCheckDelay]
-	if !ok {
-		return nil, nil
-	}
-	transientCheckDelayDuration, err := time.ParseDuration(transientCheckDelay)
-	if err != nil {
-		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerHealthTransientCheckDelay)
-		return nil, errLoadBalancerInvalidAnnotation
-	}
-
-	durationpb := durationpb.New(transientCheckDelayDuration)
-
-	return &scw.Duration{
-		Seconds: durationpb.Seconds,
-		Nanos:   durationpb.Nanos,
-	}, nil
-}
-
-func getForceInternalIP(service *v1.Service) bool {
-	forceInternalIP, ok := service.Annotations[serviceAnnotationLoadBalancerForceInternalIP]
-	if !ok {
-		return false
-	}
-	value, err := strconv.ParseBool(forceInternalIP)
-	if err != nil {
-		return false
-	}
-	return value
-}
-
-func getUseHostname(service *v1.Service) bool {
-	useHostname, ok := service.Annotations[serviceAnnotationLoadBalancerUseHostname]
-	if !ok {
-		return false
-	}
-	value, err := strconv.ParseBool(useHostname)
-	if err != nil {
-		return false
-	}
-	return value
-}
-
-func getForwardProtocol(service *v1.Service, nodePort int32) (scwlb.Protocol, error) {
-	httpProtocol := service.Annotations[serviceAnnotationLoadBalancerProtocolHTTP]
-
-	var svcPort int32 = -1
-	for _, p := range service.Spec.Ports {
-		if p.NodePort == nodePort {
-			svcPort = p.Port
-		}
-	}
-	if svcPort == -1 {
-		klog.Errorf("no valid port found")
-		return "", errLoadBalancerInvalidAnnotation
-	}
-
-	isHTTP, err := isPortInRange(httpProtocol, svcPort)
-	if err != nil {
-		klog.Errorf("unable to check if port %d is in range %s", svcPort, httpProtocol)
-		return "", err
-	}
-
-	if isHTTP {
-		return scwlb.ProtocolHTTP, nil
-	}
-
-	return scwlb.ProtocolTCP, nil
-}
-
-func getCertificateIDs(service *v1.Service, port int32) ([]string, error) {
-	certificates := service.Annotations[serviceAnnotationLoadBalancerCertificateIDs]
-	ids := []string{}
-	if certificates == "" {
-		return ids, nil
-	}
-
-	for _, perPortCertificate := range strings.Split(certificates, ";") {
-		split := strings.Split(perPortCertificate, ":")
-		if len(split) == 1 {
-			ids = append(ids, strings.Split(split[0], ",")...)
-			continue
-		}
-		inRange, err := isPortInRange(split[0], port)
-		if err != nil {
-			klog.Errorf("unable to check if port %d is in range %s", port, split[0])
-			return nil, err
-		}
-		if inRange {
-			ids = append(ids, strings.Split(split[1], ",")...)
-		}
-	}
-	// normalize the ids (ie strip the region prefix if any)
-	for i := range ids {
-		if strings.Contains(ids[i], "/") {
-			splitID := strings.Split(ids[i], "/")
-			if len(splitID) != 2 {
-				klog.Errorf("unable to get certificate ID from %s", ids[i])
-				return nil, fmt.Errorf("unable to get certificate ID from %s", ids[i])
-			}
-			ids[i] = splitID[1]
-		}
-	}
-
-	return ids, nil
-}
-
-func getValueForPort(service *v1.Service, nodePort int32, fullValue string) (string, error) {
-	var svcPort int32 = -1
-	for _, p := range service.Spec.Ports {
-		if p.NodePort == nodePort {
-			svcPort = p.Port
-		}
-	}
-
-	value := ""
-
-	for _, perPort := range strings.Split(fullValue, ";") {
-		split := strings.Split(perPort, ":")
-		if len(split) == 1 {
-			if value == "" {
-				value = split[0]
-			}
-			continue
-		}
-		if len(split) > 2 {
-			return "", fmt.Errorf("annotation with value %s is wrongly formatted, should be `port1:value1;port2,port3:value2`", fullValue)
-		}
-		inRange, err := isPortInRange(split[0], svcPort)
-		if err != nil {
-			klog.Errorf("unable to check if port %d is in range %s", svcPort, split[0])
-			return "", err
-		}
-		if inRange {
-			value = split[1]
-		}
-	}
-
-	return value, nil
-}
-
-func getHealthCheckType(service *v1.Service, nodePort int32) (string, error) {
-	annotation, ok := service.Annotations[serviceAnnotationLoadBalancerHealthCheckType]
-	if !ok {
-		return "tcp", nil
-	}
-
-	hcValue, err := getValueForPort(service, nodePort, annotation)
-	if err != nil {
-		klog.Errorf("could not get value for annotation %s and port %d", serviceAnnotationLoadBalancerHealthCheckType, nodePort)
-		return "", err
-	}
-
-	return hcValue, nil
-}
-
-func getRedisHealthCheck(service *v1.Service, nodePort int32) (*scwlb.HealthCheckRedisConfig, error) {
-	return &scwlb.HealthCheckRedisConfig{}, nil
-}
-
-func getLdapHealthCheck(service *v1.Service, nodePort int32) (*scwlb.HealthCheckLdapConfig, error) {
-	return &scwlb.HealthCheckLdapConfig{}, nil
-}
-
-func getTCPHealthCheck(service *v1.Service, nodePort int32) (*scwlb.HealthCheckTCPConfig, error) {
-	return &scwlb.HealthCheckTCPConfig{}, nil
-}
-
-func getPgsqlHealthCheck(service *v1.Service, nodePort int32) (*scwlb.HealthCheckPgsqlConfig, error) {
-	annotation, ok := service.Annotations[serviceAnnotationLoadBalancerHealthCheckPgsqlUser]
-	if !ok {
-		return nil, nil
-	}
-
-	user, err := getValueForPort(service, nodePort, annotation)
-	if err != nil {
-		klog.Errorf("could not get value for annotation %s and port %d", serviceAnnotationLoadBalancerHealthCheckPgsqlUser, nodePort)
-		return nil, err
-	}
-
-	return &scwlb.HealthCheckPgsqlConfig{
-		User: user,
-	}, nil
-}
-
-func getMysqlHealthCheck(service *v1.Service, nodePort int32) (*scwlb.HealthCheckMysqlConfig, error) {
-	annotation, ok := service.Annotations[serviceAnnotationLoadBalancerHealthCheckMysqlUser]
-	if !ok {
-		return nil, nil
-	}
-
-	user, err := getValueForPort(service, nodePort, annotation)
-	if err != nil {
-		klog.Errorf("could not get value for annotation %s and port %d", serviceAnnotationLoadBalancerHealthCheckMysqlUser, nodePort)
-		return nil, err
-	}
-
-	return &scwlb.HealthCheckMysqlConfig{
-		User: user,
-	}, nil
-}
-
-func getHTTPHealthCheckCode(service *v1.Service, nodePort int32) (int32, error) {
-	annotation, ok := service.Annotations[serviceAnnotationLoadBalancerHealthCheckHTTPCode]
-	if !ok {
-		return 200, nil
-	}
-
-	stringCode, err := getValueForPort(service, nodePort, annotation)
-	if err != nil {
-		klog.Errorf("could not get value for annotation %s and port %d", serviceAnnotationLoadBalancerHealthCheckHTTPCode, nodePort)
-		return 0, err
-	}
-
-	code, err := strconv.Atoi(stringCode)
-	if err != nil {
-		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerHealthCheckHTTPCode)
-		return 0, errLoadBalancerInvalidAnnotation
-	}
-
-	return int32(code), nil
-}
-
-func getHTTPHealthCheckURI(service *v1.Service, nodePort int32) (string, error) {
-	annotation, ok := service.Annotations[serviceAnnotationLoadBalancerHealthCheckHTTPURI]
-	if !ok {
-		return "/", nil
-	}
-
-	uri, err := getValueForPort(service, nodePort, annotation)
-	if err != nil {
-		klog.Errorf("could not get value for annotation %s and port %d", serviceAnnotationLoadBalancerHealthCheckHTTPURI, nodePort)
-		return "", err
-	}
-
-	return uri, nil
-}
-
-func getHTTPHealthCheckMethod(service *v1.Service, nodePort int32) (string, error) {
-	annotation, ok := service.Annotations[serviceAnnotationLoadBalancerHealthCheckHTTPMethod]
-	if !ok {
-		return "GET", nil
-	}
-
-	method, err := getValueForPort(service, nodePort, annotation)
-	if err != nil {
-		klog.Errorf("could not get value for annotation %s and port %d", serviceAnnotationLoadBalancerHealthCheckHTTPMethod, nodePort)
-		return "", err
-	}
-
-	return method, nil
-}
-
-func getHTTPHealthCheck(service *v1.Service, nodePort int32) (*scwlb.HealthCheckHTTPConfig, error) {
-	code, err := getHTTPHealthCheckCode(service, nodePort)
-	if err != nil {
-		return nil, err
-	}
-
-	uriStr, err := getHTTPHealthCheckURI(service, nodePort)
-	if err != nil {
-		return nil, err
-	}
-	uri, err := url.Parse(fmt.Sprintf("http://%s", uriStr))
-	if err != nil {
-		return nil, err
-	}
-	if uri.Path == "" {
-		uri.Path = "/"
-	}
-
-	method, err := getHTTPHealthCheckMethod(service, nodePort)
-	if err != nil {
-		return nil, err
-	}
-
-	return &scwlb.HealthCheckHTTPConfig{
-		Method:     method,
-		Code:       &code,
-		URI:        uri.RequestURI(),
-		HostHeader: uri.Host,
-	}, nil
-}
-
-func getHTTPSHealthCheck(service *v1.Service, nodePort int32) (*scwlb.HealthCheckHTTPSConfig, error) {
-	code, err := getHTTPHealthCheckCode(service, nodePort)
-	if err != nil {
-		return nil, err
-	}
-
-	uriStr, err := getHTTPHealthCheckURI(service, nodePort)
-	if err != nil {
-		return nil, err
-	}
-	uri, err := url.Parse(fmt.Sprintf("https://%s", uriStr))
-	if err != nil {
-		return nil, err
-	}
-	if uri.Path == "" {
-		uri.Path = "/"
-	}
-
-	method, err := getHTTPHealthCheckMethod(service, nodePort)
-	if err != nil {
-		return nil, err
-	}
-
-	return &scwlb.HealthCheckHTTPSConfig{
-		Method:     method,
-		Code:       &code,
-		URI:        uri.Path,
-		HostHeader: uri.Host,
-		Sni:        uri.Host,
-	}, nil
-}
-
-func svcPrivate(service *v1.Service) (bool, error) {
-	isPrivate, ok := service.Annotations[serviceAnnotationLoadBalancerPrivate]
-	if !ok {
-		return false, nil
-	}
-	return strconv.ParseBool(isPrivate)
-}
-
-// Original version: https://github.com/kubernetes/legacy-cloud-providers/blob/1aa918bf227e52af6f8feb3fa065dabff251a0a3/aws/aws_loadbalancer.go#L117
-func getKeyValueFromAnnotation(annotation string) map[string]string {
-	additionalTags := make(map[string]string)
-	additionalTagsList := strings.TrimSpace(annotation)
-
-	// Break up list of "Key1=Val,Key2=Val2"
-	tagList := strings.Split(additionalTagsList, ",")
-
-	// Break up "Key=Val"
-	for _, tagSet := range tagList {
-		tag := strings.Split(strings.TrimSpace(tagSet), "=")
-
-		// Accept "Key=val" or "Key=" or just "Key"
-		if len(tag) >= 2 && len(tag[0]) != 0 {
-			// There is a key and a value, so save it
-			additionalTags[tag[0]] = tag[1]
-		} else if len(tag) == 1 && len(tag[0]) != 0 {
-			// Just "Key"
-			additionalTags[tag[0]] = ""
-		}
-	}
-
-	return additionalTags
-}
-
+// filterNodes uses node labels to filter the nodes that should be targeted by the load balancer,
+// checking if all the labels provided in an annotation are present in the nodes
+//
 // Original version: https://github.com/kubernetes/legacy-cloud-providers/blob/1aa918bf227e52af6f8feb3fa065dabff251a0a3/aws/aws_loadbalancer.go#L1631
 func filterNodes(service *v1.Service, nodes []*v1.Node) []*v1.Node {
 	nodeLabels, ok := service.Annotations[serviceAnnotationLoadBalancerTargetNodeLabels]
@@ -1637,6 +950,7 @@ func filterNodes(service *v1.Service, nodes []*v1.Node) []*v1.Node {
 	return targetNodes
 }
 
+// servicePortToFrontend converts a specific port of a service definition to a load balancer frontend
 func servicePortToFrontend(service *v1.Service, loadbalancer *scwlb.LB, port v1.ServicePort) (*scwlb.Frontend, error) {
 	timeoutClient, err := getTimeoutClient(service)
 	if err != nil {
@@ -1657,6 +971,7 @@ func servicePortToFrontend(service *v1.Service, loadbalancer *scwlb.LB, port v1.
 	}, nil
 }
 
+// servicePortToBackend converts a specific port of a service definition to a load balancer backend with the specified list of target nodes
 func servicePortToBackend(service *v1.Service, loadbalancer *scwlb.LB, port v1.ServicePort, nodeIPs []string) (*scwlb.Backend, error) {
 	protocol, err := getForwardProtocol(service, port.NodePort)
 	if err != nil {
@@ -1821,6 +1136,7 @@ func servicePortToBackend(service *v1.Service, loadbalancer *scwlb.LB, port v1.S
 	return backend, nil
 }
 
+// serviceToLB converts a service definition to a list of load balancer frontends and backends
 func serviceToLB(service *v1.Service, loadbalancer *scwlb.LB, nodeIPs []string) (map[int32]*scwlb.Frontend, map[int32]*scwlb.Backend, error) {
 	frontends := map[int32]*scwlb.Frontend{}
 	backends := map[int32]*scwlb.Backend{}
@@ -1843,6 +1159,7 @@ func serviceToLB(service *v1.Service, loadbalancer *scwlb.LB, nodeIPs []string) 
 	return frontends, backends, nil
 }
 
+// frontendEquals returns true if the two frontends configuration are equal
 func frontendEquals(got, want *scwlb.Frontend) bool {
 	if got == nil || want == nil {
 		return got == want
@@ -1869,6 +1186,7 @@ func frontendEquals(got, want *scwlb.Frontend) bool {
 	return true
 }
 
+// backendEquals returns true if the two backends configuration are equal
 func backendEquals(got, want *scwlb.Backend) bool {
 	if got == nil || want == nil {
 		return got == want
@@ -1942,14 +1260,23 @@ type frontendOps struct {
 	keep   map[int32]*scwlb.Frontend
 }
 
-func compareFrontends(got []*scwlb.Frontend, want map[int32]*scwlb.Frontend) frontendOps {
+// compareFrontends returns the frontends operation to do to achieve the wanted configuration
+// will ignore frontends with names not starting with the filterPrefix if provided
+func compareFrontends(got []*scwlb.Frontend, want map[int32]*scwlb.Frontend, filterPrefix string) frontendOps {
 	remove := make(map[int32]*scwlb.Frontend)
 	update := make(map[int32]*scwlb.Frontend)
 	create := make(map[int32]*scwlb.Frontend)
 	keep := make(map[int32]*scwlb.Frontend)
 
-	// Check for deletions and updates
+	filteredGot := make([]*scwlb.Frontend, 0, len(got))
 	for _, current := range got {
+		if strings.HasPrefix(current.Name, filterPrefix) {
+			filteredGot = append(filteredGot, current)
+		}
+	}
+
+	// Check for deletions and updates
+	for _, current := range filteredGot {
 		if target, ok := want[current.InboundPort]; ok {
 			if !frontendEquals(current, target) {
 				target.ID = current.ID
@@ -1965,7 +1292,7 @@ func compareFrontends(got []*scwlb.Frontend, want map[int32]*scwlb.Frontend) fro
 	// Check for additions
 	for _, target := range want {
 		found := false
-		for _, current := range got {
+		for _, current := range filteredGot {
 			if current.InboundPort == target.InboundPort {
 				found = true
 				break
@@ -1991,14 +1318,22 @@ type backendOps struct {
 	keep   map[int32]*scwlb.Backend
 }
 
-func compareBackends(got []*scwlb.Backend, want map[int32]*scwlb.Backend) backendOps {
+// compareBackends returns the backends operation to do to achieve the wanted configuration
+func compareBackends(got []*scwlb.Backend, want map[int32]*scwlb.Backend, filterPrefix string) backendOps {
 	remove := make(map[int32]*scwlb.Backend)
 	update := make(map[int32]*scwlb.Backend)
 	create := make(map[int32]*scwlb.Backend)
 	keep := make(map[int32]*scwlb.Backend)
 
-	// Check for deletions and updates
+	filteredGot := make([]*scwlb.Backend, 0, len(got))
 	for _, current := range got {
+		if strings.HasPrefix(current.Name, filterPrefix) {
+			filteredGot = append(filteredGot, current)
+		}
+	}
+
+	// Check for deletions and updates
+	for _, current := range filteredGot {
 		if target, ok := want[current.ForwardPort]; ok {
 			if !backendEquals(current, target) {
 				target.ID = current.ID
@@ -2014,7 +1349,7 @@ func compareBackends(got []*scwlb.Backend, want map[int32]*scwlb.Backend) backen
 	// Check for additions
 	for _, target := range want {
 		found := false
-		for _, current := range got {
+		for _, current := range filteredGot {
 			if current.ForwardPort == target.ForwardPort {
 				found = true
 				break
@@ -2033,6 +1368,7 @@ func compareBackends(got []*scwlb.Backend, want map[int32]*scwlb.Backend) backen
 	}
 }
 
+// aclsEquals returns true if both acl lists are equal
 func aclsEquals(got []*scwlb.ACL, want []*scwlb.ACLSpec) bool {
 	if len(got) != len(want) {
 		return false
@@ -2067,6 +1403,7 @@ func aclsEquals(got []*scwlb.ACL, want []*scwlb.ACLSpec) bool {
 	return true
 }
 
+// createBackend creates a backend on the load balancer
 func (l *loadbalancers) createBackend(service *v1.Service, loadbalancer *scwlb.LB, backend *scwlb.Backend) (*scwlb.Backend, error) {
 	b, err := l.api.CreateBackend(&scwlb.ZonedAPICreateBackendRequest{
 		Zone:                     loadbalancer.Zone,
@@ -2094,6 +1431,7 @@ func (l *loadbalancers) createBackend(service *v1.Service, loadbalancer *scwlb.L
 	return b, nil
 }
 
+// updateBackend updates a backend on the load balancer
 func (l *loadbalancers) updateBackend(service *v1.Service, loadbalancer *scwlb.LB, backend *scwlb.Backend) (*scwlb.Backend, error) {
 	b, err := l.api.UpdateBackend(&scwlb.ZonedAPIUpdateBackendRequest{
 		Zone:                     loadbalancer.Zone,
@@ -2139,6 +1477,7 @@ func (l *loadbalancers) updateBackend(service *v1.Service, loadbalancer *scwlb.L
 	return b, nil
 }
 
+// createBackend creates a frontend on the load balancer
 func (l *loadbalancers) createFrontend(service *v1.Service, loadbalancer *scwlb.LB, frontend *scwlb.Frontend, backend *scwlb.Backend) (*scwlb.Frontend, error) {
 	f, err := l.api.CreateFrontend(&scwlb.ZonedAPICreateFrontendRequest{
 		Zone:           loadbalancer.Zone,
@@ -2154,6 +1493,7 @@ func (l *loadbalancers) createFrontend(service *v1.Service, loadbalancer *scwlb.
 	return f, err
 }
 
+// updateBackend updates a frontend on the load balancer
 func (l *loadbalancers) updateFrontend(service *v1.Service, loadbalancer *scwlb.LB, frontend *scwlb.Frontend, backend *scwlb.Backend) (*scwlb.Frontend, error) {
 	f, err := l.api.UpdateFrontend(&scwlb.ZonedAPIUpdateFrontendRequest{
 		Zone:           loadbalancer.Zone,
@@ -2169,18 +1509,21 @@ func (l *loadbalancers) updateFrontend(service *v1.Service, loadbalancer *scwlb.
 	return f, err
 }
 
+// stringArrayEqual returns true if both arrays contains the exact same elements regardless of the order
 func stringArrayEqual(got, want []string) bool {
 	slices.Sort(got)
 	slices.Sort(want)
 	return reflect.DeepEqual(got, want)
 }
 
+// stringPtrArrayEqual returns true if both arrays contains the exact same elements regardless of the order
 func stringPtrArrayEqual(got, want []*string) bool {
 	slices.SortStableFunc(got, func(a, b *string) bool { return *a < *b })
 	slices.SortStableFunc(want, func(a, b *string) bool { return *a < *b })
 	return reflect.DeepEqual(got, want)
 }
 
+// durationPtrEqual returns true if both duration are equal
 func durationPtrEqual(got, want *time.Duration) bool {
 	if got == nil && want == nil {
 		return true
@@ -2191,6 +1534,7 @@ func durationPtrEqual(got, want *time.Duration) bool {
 	return *got == *want
 }
 
+// scwDurationPtrEqual returns true if both duration are equal
 func scwDurationPtrEqual(got, want *scw.Duration) bool {
 	if got == nil && want == nil {
 		return true
@@ -2201,6 +1545,7 @@ func scwDurationPtrEqual(got, want *scw.Duration) bool {
 	return *got == *want
 }
 
+// int32PtrEqual returns true if both integers are equal
 func int32PtrEqual(got, want *int32) bool {
 	if got == nil && want == nil {
 		return true
@@ -2211,6 +1556,7 @@ func int32PtrEqual(got, want *int32) bool {
 	return *got == *want
 }
 
+// chunkArray takes an array and split it in chunks of a given size
 func chunkArray(array []string, maxChunkSize int) [][]string {
 	result := [][]string{}
 
@@ -2235,6 +1581,7 @@ func makeACLPrefix(frontend *scwlb.Frontend) string {
 	return fmt.Sprintf("%s-lb-source-range", frontend.ID)
 }
 
+// makeACLSpecs converts a service frontend definition to acl specifications
 func makeACLSpecs(service *v1.Service, nodes []*v1.Node, frontend *scwlb.Frontend) []*scwlb.ACLSpec {
 	if len(service.Spec.LoadBalancerSourceRanges) == 0 {
 		return []*scwlb.ACLSpec{}
