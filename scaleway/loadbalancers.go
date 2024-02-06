@@ -485,13 +485,11 @@ func (l *loadbalancers) fetchLoadBalancer(ctx context.Context, clusterName strin
 func (l *loadbalancers) getLoadbalancerByName(ctx context.Context, service *v1.Service) (*scwlb.LB, error) {
 	name := l.GetLoadBalancerName(ctx, "", service)
 
-	lbReq := &scwlb.ZonedAPIListLBsRequest{
+	var loadbalancer *scwlb.LB
+	resp, err := l.api.ListLBs(&scwlb.ZonedAPIListLBsRequest{
 		Name: &name,
 		Zone: getLoadBalancerZone(service),
-	}
-
-	var loadbalancer *scwlb.LB
-	resp, err := l.api.ListLBs(lbReq, scw.WithAllPages())
+	}, scw.WithAllPages())
 	if err != nil {
 		return nil, err
 	}
