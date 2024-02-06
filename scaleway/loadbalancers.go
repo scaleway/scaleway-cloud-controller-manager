@@ -487,10 +487,7 @@ func (l *loadbalancers) getLoadbalancerByName(ctx context.Context, service *v1.S
 
 	lbReq := &scwlb.ZonedAPIListLBsRequest{
 		Name: &name,
-	}
-
-	if _, ok := service.Annotations[serviceAnnotationLoadBalancerZone]; ok {
-		lbReq.Zone = getLoadBalancerZone(service)
+		Zone: getLoadBalancerZone(service),
 	}
 
 	var loadbalancer *scwlb.LB
