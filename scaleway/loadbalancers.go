@@ -422,8 +422,8 @@ func (l *loadbalancers) getLoadbalancerByName(ctx context.Context, clusterName s
 
 	var loadbalancer *scwlb.LB
 	resp, err := l.api.ListLBs(&scwlb.ZonedAPIListLBsRequest{
-		// Zone: Use default zone from SDK
 		Name: &name,
+		Zone: getLoadBalancerZone(service),
 	}, scw.WithAllPages())
 	if err != nil {
 		return nil, err
@@ -1170,7 +1170,7 @@ func frontendEquals(got, want *scwlb.Frontend) bool {
 		return false
 	}
 	if got.InboundPort != want.InboundPort {
-		klog.V(3).Infof("frontend.InboundPort: %s - %s", got.InboundPort, want.InboundPort)
+		klog.V(3).Infof("frontend.InboundPort: %d - %d", got.InboundPort, want.InboundPort)
 		return false
 	}
 	if !durationPtrEqual(got.TimeoutClient, want.TimeoutClient) {
@@ -1197,7 +1197,7 @@ func backendEquals(got, want *scwlb.Backend) bool {
 		return false
 	}
 	if got.ForwardPort != want.ForwardPort {
-		klog.V(3).Infof("backend.ForwardPort: %s - %s", got.ForwardPort, want.ForwardPort)
+		klog.V(3).Infof("backend.ForwardPort: %d - %d", got.ForwardPort, want.ForwardPort)
 		return false
 	}
 	if got.ForwardProtocol != want.ForwardProtocol {
@@ -1233,11 +1233,11 @@ func backendEquals(got, want *scwlb.Backend) bool {
 		return false
 	}
 	if !int32PtrEqual(got.RedispatchAttemptCount, want.RedispatchAttemptCount) {
-		klog.V(3).Infof("backend.RedispatchAttemptCount: %s - %s", got.RedispatchAttemptCount, want.RedispatchAttemptCount)
+		klog.V(3).Infof("backend.RedispatchAttemptCount: %s - %s", ptrInt32ToString(got.RedispatchAttemptCount), ptrInt32ToString(want.RedispatchAttemptCount))
 		return false
 	}
 	if !int32PtrEqual(got.MaxRetries, want.MaxRetries) {
-		klog.V(3).Infof("backend.MaxRetries: %s - %s", got.MaxRetries, want.MaxRetries)
+		klog.V(3).Infof("backend.MaxRetries: %s - %s", ptrInt32ToString(got.MaxRetries), ptrInt32ToString(want.MaxRetries))
 		return false
 	}
 	if got.StickySessionsCookieName != want.StickySessionsCookieName {
@@ -1246,7 +1246,7 @@ func backendEquals(got, want *scwlb.Backend) bool {
 	}
 
 	if !reflect.DeepEqual(got.HealthCheck, want.HealthCheck) {
-		klog.V(3).Infof("backend.HealthCheck: %s - %s", got.HealthCheck, want.HealthCheck)
+		klog.V(3).Infof("backend.HealthCheck: %v - %v", got.HealthCheck, want.HealthCheck)
 		return false
 	}
 
@@ -1590,7 +1590,7 @@ func makeACLSpecs(service *v1.Service, nodes []*v1.Node, frontend *scwlb.Fronten
 	aclPrefix := makeACLPrefix(frontend)
 	whitelist := extractNodesInternalIps(nodes)
 	whitelist = append(whitelist, extractNodesExternalIps(nodes)...)
-	whitelist = append(whitelist, service.Spec.LoadBalancerSourceRanges...)
+	whitelist = append(whitelist, strip32SubnetMasks(service.Spec.LoadBalancerSourceRanges)...)
 
 	slices.Sort(whitelist)
 
@@ -1622,4 +1622,19 @@ func makeACLSpecs(service *v1.Service, nodes []*v1.Node, frontend *scwlb.Fronten
 	}
 
 	return acls
+}
+
+func strip32SubnetMasks(subnets []string) []string {
+	stripped := make([]string, len(subnets))
+	for idx, subnet := range subnets {
+		stripped[idx] = strings.TrimSuffix(subnet, "/32")
+	}
+	return stripped
+}
+
+func ptrInt32ToString(i *int32) string {
+	if i == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("%d", *i)
 }
