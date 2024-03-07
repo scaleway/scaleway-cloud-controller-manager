@@ -140,6 +140,14 @@ This is the annotation to set the forward protocol of the LB to HTTP.
 The possible values are `false`, `true` or `*` for all ports or a comma delimited list of the service port (for instance `80,443`).
 NB: forwarding HTTPS traffic with HTTP protocol enabled will work only if using a certificate, and the LB will send HTTP traffic to the backend.
 
+### `service.beta.kubernetes.io/scw-loadbalancer-http-backend-tls`
+This is the annotation to enable tls towards the backend when using http forward protocol
+The possible values are `false`, `true` or `*` for all ports or a comma delimited list of the service port (for instance `80,443`)
+
+### `service.beta.kubernetes.io/scw-loadbalancer-http-backend-tls-skip-verify`
+This is the annotation to skip tls verification on backends when using http forward protocol with TLS enabled
+The possible values are `false`, `true` or `*` for all ports or a comma delimited list of the service port (for instance `80,443`)
+
 ### `service.beta.kubernetes.io/scw-loadbalancer-certificate-ids`
 This is the annotation to choose the the certificate IDs to associate with this LoadBalancer.
 The possible format are:
