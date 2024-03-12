@@ -553,8 +553,11 @@ func getForwardProtocol(service *v1.Service, nodePort int32) (scwlb.Protocol, er
 	return scwlb.ProtocolTCP, nil
 }
 
-func getSSLBridging(service *v1.Service, nodePort int32) (bool, error) {
-	tlsEnabled := service.Annotations[serviceAnnotationLoadBalancerHTTPBackendTLS]
+func getSSLBridging(service *v1.Service, nodePort int32) (*bool, error) {
+	tlsEnabled, found := service.Annotations[serviceAnnotationLoadBalancerHTTPBackendTLS]
+	if !found {
+		return nil, nil
+	}
 
 	var svcPort int32 = -1
 	for _, p := range service.Spec.Ports {
@@ -564,20 +567,23 @@ func getSSLBridging(service *v1.Service, nodePort int32) (bool, error) {
 	}
 	if svcPort == -1 {
 		klog.Errorf("no valid port found")
-		return false, errLoadBalancerInvalidAnnotation
+		return nil, errLoadBalancerInvalidAnnotation
 	}
 
 	isTLSEnabled, err := isPortInRange(tlsEnabled, svcPort)
 	if err != nil {
 		klog.Errorf("unable to check if port %d is in range %s", svcPort, tlsEnabled)
-		return false, err
+		return nil, err
 	}
 
-	return isTLSEnabled, nil
+	return scw.BoolPtr(isTLSEnabled), nil
 }
 
-func getSSLBridgingSkipVerify(service *v1.Service, nodePort int32) (bool, error) {
-	skipTLSVerify := service.Annotations[serviceAnnotationLoadBalancerHTTPBackendTLSSkipVerify]
+func getSSLBridgingSkipVerify(service *v1.Service, nodePort int32) (*bool, error) {
+	skipTLSVerify, found := service.Annotations[serviceAnnotationLoadBalancerHTTPBackendTLSSkipVerify]
+	if !found {
+		return nil, nil
+	}
 
 	var svcPort int32 = -1
 	for _, p := range service.Spec.Ports {
@@ -587,16 +593,16 @@ func getSSLBridgingSkipVerify(service *v1.Service, nodePort int32) (bool, error)
 	}
 	if svcPort == -1 {
 		klog.Errorf("no valid port found")
-		return false, errLoadBalancerInvalidAnnotation
+		return nil, errLoadBalancerInvalidAnnotation
 	}
 
 	isSkipTLSVerify, err := isPortInRange(skipTLSVerify, svcPort)
 	if err != nil {
 		klog.Errorf("unable to check if port %d is in range %s", svcPort, skipTLSVerify)
-		return false, err
+		return nil, err
 	}
 
-	return isSkipTLSVerify, nil
+	return scw.BoolPtr(isSkipTLSVerify), nil
 }
 
 func getCertificateIDs(service *v1.Service, port int32) ([]string, error) {
