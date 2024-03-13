@@ -5,7 +5,7 @@ go 1.21
 require (
 	github.com/scaleway/scaleway-sdk-go v1.0.0-beta.22
 	golang.org/x/exp v0.0.0-20220722155223-a9213eeb770e
-	google.golang.org/protobuf v1.32.0
+	google.golang.org/protobuf v1.33.0
 	k8s.io/api v0.29.1
 	k8s.io/apimachinery v0.29.1
 	k8s.io/client-go v0.29.1
