@@ -44,6 +44,10 @@ const (
 	// The default value is "5s". The duration are go's time.Duration (ex: "1s", "2m", "4h", ...)
 	serviceAnnotationLoadBalancerHealthCheckDelay = "service.beta.kubernetes.io/scw-loadbalancer-health-check-delay"
 
+	// serviceAnnotationLoadBalancerHealthCheckSendProxy is the annotation to control if health check should send proxy protocol message
+	// The default value is "false"
+	serviceAnnotationLoadBalancerHealthCheckSendProxy = "service.beta.kubernetes.io/scw-loadbalancer-health-check-send-proxy"
+
 	// serviceAnnotationLoadBalancerHealthTransientCheckDelay is the time between two consecutive health checks on transient state (going UP or DOWN)
 	// The default value is "0.5s". The duration are go's time.Duration (ex: "1s", "2m", "4h", ...)
 	serviceAnnotationLoadBalancerHealthTransientCheckDelay = "service.beta.kubernetes.io/scw-loadbalancer-health-transient-check-delay"
@@ -471,6 +475,20 @@ func getHealthCheckMaxRetries(service *v1.Service) (int32, error) {
 	}
 
 	return int32(healthCheckMaxRetriesInt), nil
+}
+
+func getHealthCheckSendProxy(service *v1.Service) (bool, error) {
+	sendProxy, ok := service.Annotations[serviceAnnotationLoadBalancerHealthCheckSendProxy]
+	if !ok {
+		return false, nil
+	}
+	sendProxyBool, err := strconv.ParseBool(sendProxy)
+	if err != nil {
+		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerHealthCheckSendProxy)
+		return false, errLoadBalancerInvalidAnnotation
+	}
+
+	return sendProxyBool, nil
 }
 
 func getHealthCheckTransientCheckDelay(service *v1.Service) (*scw.Duration, error) {
