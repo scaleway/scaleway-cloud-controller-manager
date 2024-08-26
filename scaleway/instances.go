@@ -166,12 +166,16 @@ func (i *instances) instanceAddresses(server *scwinstance.Server) ([]v1.NodeAddr
 		{Type: v1.NodeHostName, Address: server.Hostname},
 	}
 
-	if server.PublicIP != nil {
-		addresses = append(
-			addresses,
-			v1.NodeAddress{Type: v1.NodeExternalIP, Address: server.PublicIP.Address.String()},
-			v1.NodeAddress{Type: v1.NodeExternalDNS, Address: fmt.Sprintf("%s.pub.instances.scw.cloud", server.ID)},
-		)
+	// get the first dhcp provisionned ip if any (meaning not manually attached)
+	for _, ip := range server.PublicIPs {
+		if ip.Family == scwinstance.ServerIPIPFamilyInet && ip.ProvisioningMode == scwinstance.ServerIPProvisioningModeDHCP {
+			addresses = append(
+				addresses,
+				v1.NodeAddress{Type: v1.NodeExternalIP, Address: ip.Address.String()},
+				v1.NodeAddress{Type: v1.NodeExternalDNS, Address: fmt.Sprintf("%s.pub.instances.scw.cloud", server.ID)},
+			)
+			break
+		}
 	}
 
 	var pnNIC *scwinstance.PrivateNIC

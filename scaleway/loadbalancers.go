@@ -1374,8 +1374,8 @@ func aclsEquals(got []*scwlb.ACL, want []*scwlb.ACLSpec) bool {
 		return false
 	}
 
-	slices.SortStableFunc(got, func(a, b *scwlb.ACL) bool { return a.Index < b.Index })
-	slices.SortStableFunc(want, func(a, b *scwlb.ACLSpec) bool { return a.Index < b.Index })
+	slices.SortStableFunc(got, func(a, b *scwlb.ACL) int { return int(a.Index - b.Index) })
+	slices.SortStableFunc(want, func(a, b *scwlb.ACLSpec) int { return int(a.Index - b.Index) })
 	for idx := range want {
 		if want[idx].Name != got[idx].Name {
 			return false
@@ -1518,8 +1518,8 @@ func stringArrayEqual(got, want []string) bool {
 
 // stringPtrArrayEqual returns true if both arrays contains the exact same elements regardless of the order
 func stringPtrArrayEqual(got, want []*string) bool {
-	slices.SortStableFunc(got, func(a, b *string) bool { return *a < *b })
-	slices.SortStableFunc(want, func(a, b *string) bool { return *a < *b })
+	slices.SortStableFunc(got, func(a, b *string) int { return strings.Compare(*a, *b) })
+	slices.SortStableFunc(want, func(a, b *string) int { return strings.Compare(*a, *b) })
 	return reflect.DeepEqual(got, want)
 }
 
