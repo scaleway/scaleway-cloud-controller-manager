@@ -44,7 +44,7 @@ const (
 	// The default value is "5s". The duration are go's time.Duration (ex: "1s", "2m", "4h", ...)
 	serviceAnnotationLoadBalancerHealthCheckDelay = "service.beta.kubernetes.io/scw-loadbalancer-health-check-delay"
 
-	// serviceAnnotationLoadBalancerHealthCheckSendProxy is the annotation to control if health check should send proxy protocol message
+	// serviceAnnotationLoadBalancerHealthCheckSendProxy is the annotation to control if proxy protocol should be activated for the health check.
 	// The default value is "false"
 	serviceAnnotationLoadBalancerHealthCheckSendProxy = "service.beta.kubernetes.io/scw-loadbalancer-health-check-send-proxy"
 
