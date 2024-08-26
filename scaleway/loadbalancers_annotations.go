@@ -140,6 +140,16 @@ const (
 	// (for instance "80,443")
 	serviceAnnotationLoadBalancerProtocolHTTP = "service.beta.kubernetes.io/scw-loadbalancer-protocol-http"
 
+	// serviceAnnotationLoadBalancerHTTPBackendTLS is the annotation to enable tls towards the backend when using http forward protocol
+	// The possible values are "false", "true" or "*" for all ports or a comma delimited list of the service port
+	// (for instance "80,443")
+	serviceAnnotationLoadBalancerHTTPBackendTLS = "service.beta.kubernetes.io/scw-loadbalancer-http-backend-tls"
+
+	// serviceAnnotationLoadBalancerHTTPBackendTLSSkipVerify is the annotation to skip tls verification on backends when using http forward protocol with TLS enabled
+	// The possible values are "false", "true" or "*" for all ports or a comma delimited list of the service port
+	// (for instance "80,443")
+	serviceAnnotationLoadBalancerHTTPBackendTLSSkipVerify = "service.beta.kubernetes.io/scw-loadbalancer-http-backend-tls-skip-verify"
+
 	// serviceAnnotationLoadBalancerCertificateIDs is the annotation to choose the certificate IDS to associate
 	// with this LoadBalancer.
 	// The possible format are:
@@ -559,6 +569,58 @@ func getForwardProtocol(service *v1.Service, nodePort int32) (scwlb.Protocol, er
 	}
 
 	return scwlb.ProtocolTCP, nil
+}
+
+func getSSLBridging(service *v1.Service, nodePort int32) (*bool, error) {
+	tlsEnabled, found := service.Annotations[serviceAnnotationLoadBalancerHTTPBackendTLS]
+	if !found {
+		return nil, nil
+	}
+
+	var svcPort int32 = -1
+	for _, p := range service.Spec.Ports {
+		if p.NodePort == nodePort {
+			svcPort = p.Port
+		}
+	}
+	if svcPort == -1 {
+		klog.Errorf("no valid port found")
+		return nil, errLoadBalancerInvalidAnnotation
+	}
+
+	isTLSEnabled, err := isPortInRange(tlsEnabled, svcPort)
+	if err != nil {
+		klog.Errorf("unable to check if port %d is in range %s", svcPort, tlsEnabled)
+		return nil, err
+	}
+
+	return scw.BoolPtr(isTLSEnabled), nil
+}
+
+func getSSLBridgingSkipVerify(service *v1.Service, nodePort int32) (*bool, error) {
+	skipTLSVerify, found := service.Annotations[serviceAnnotationLoadBalancerHTTPBackendTLSSkipVerify]
+	if !found {
+		return nil, nil
+	}
+
+	var svcPort int32 = -1
+	for _, p := range service.Spec.Ports {
+		if p.NodePort == nodePort {
+			svcPort = p.Port
+		}
+	}
+	if svcPort == -1 {
+		klog.Errorf("no valid port found")
+		return nil, errLoadBalancerInvalidAnnotation
+	}
+
+	isSkipTLSVerify, err := isPortInRange(skipTLSVerify, svcPort)
+	if err != nil {
+		klog.Errorf("unable to check if port %d is in range %s", svcPort, skipTLSVerify)
+		return nil, err
+	}
+
+	return scw.BoolPtr(isSkipTLSVerify), nil
 }
 
 func getCertificateIDs(service *v1.Service, port int32) ([]string, error) {

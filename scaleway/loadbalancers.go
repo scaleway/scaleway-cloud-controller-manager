@@ -978,6 +978,16 @@ func servicePortToBackend(service *v1.Service, loadbalancer *scwlb.LB, port v1.S
 		return nil, err
 	}
 
+	sslBridging, err := getSSLBridging(service, port.NodePort)
+	if err != nil {
+		return nil, err
+	}
+
+	sslSkipVerify, err := getSSLBridgingSkipVerify(service, port.NodePort)
+	if err != nil {
+		return nil, err
+	}
+
 	forwardPortAlgorithm, err := getForwardPortAlgorithm(service)
 	if err != nil {
 		return nil, err
@@ -1113,8 +1123,10 @@ func servicePortToBackend(service *v1.Service, loadbalancer *scwlb.LB, port v1.S
 	backend := &scwlb.Backend{
 		Name:                   fmt.Sprintf("%s_tcp_%d", string(service.UID), port.NodePort),
 		Pool:                   nodeIPs,
-		ForwardPort:            port.NodePort,
 		ForwardProtocol:        protocol,
+		SslBridging:            sslBridging,
+		IgnoreSslServerVerify:  sslSkipVerify,
+		ForwardPort:            port.NodePort,
 		ForwardPortAlgorithm:   forwardPortAlgorithm,
 		StickySessions:         stickySessions,
 		ProxyProtocol:          proxyProtocol,
@@ -1202,12 +1214,20 @@ func backendEquals(got, want *scwlb.Backend) bool {
 		klog.V(3).Infof("backend.Name: %s - %s", got.Name, want.Name)
 		return false
 	}
-	if got.ForwardPort != want.ForwardPort {
-		klog.V(3).Infof("backend.ForwardPort: %d - %d", got.ForwardPort, want.ForwardPort)
-		return false
-	}
 	if got.ForwardProtocol != want.ForwardProtocol {
 		klog.V(3).Infof("backend.ForwardProtocol: %s - %s", got.ForwardProtocol, want.ForwardProtocol)
+		return false
+	}
+	if !reflect.DeepEqual(got.SslBridging, want.SslBridging) {
+		klog.V(3).Infof("backend.SslBridging: %s - %s", ptrBoolToString(got.SslBridging), ptrBoolToString(want.SslBridging))
+		return false
+	}
+	if !reflect.DeepEqual(got.IgnoreSslServerVerify, want.IgnoreSslServerVerify) {
+		klog.V(3).Infof("backend.IgnoreSslServerVerify: %s - %s", ptrBoolToString(got.IgnoreSslServerVerify), ptrBoolToString(want.IgnoreSslServerVerify))
+		return false
+	}
+	if got.ForwardPort != want.ForwardPort {
+		klog.V(3).Infof("backend.ForwardPort: %d - %d", got.ForwardPort, want.ForwardPort)
 		return false
 	}
 	if got.ForwardPortAlgorithm != want.ForwardPortAlgorithm {
@@ -1380,8 +1400,8 @@ func aclsEquals(got []*scwlb.ACL, want []*scwlb.ACLSpec) bool {
 		return false
 	}
 
-	slices.SortStableFunc(got, func(a, b *scwlb.ACL) bool { return a.Index < b.Index })
-	slices.SortStableFunc(want, func(a, b *scwlb.ACLSpec) bool { return a.Index < b.Index })
+	slices.SortStableFunc(got, func(a, b *scwlb.ACL) int { return int(a.Index - b.Index) })
+	slices.SortStableFunc(want, func(a, b *scwlb.ACLSpec) int { return int(a.Index - b.Index) })
 	for idx := range want {
 		if want[idx].Name != got[idx].Name {
 			return false
@@ -1416,6 +1436,7 @@ func (l *loadbalancers) createBackend(service *v1.Service, loadbalancer *scwlb.L
 		LBID:                     loadbalancer.ID,
 		Name:                     backend.Name,
 		ForwardProtocol:          backend.ForwardProtocol,
+		SslBridging:              backend.SslBridging,
 		ForwardPort:              backend.ForwardPort,
 		ForwardPortAlgorithm:     backend.ForwardPortAlgorithm,
 		StickySessions:           backend.StickySessions,
@@ -1444,6 +1465,7 @@ func (l *loadbalancers) updateBackend(service *v1.Service, loadbalancer *scwlb.L
 		BackendID:                backend.ID,
 		Name:                     backend.Name,
 		ForwardProtocol:          backend.ForwardProtocol,
+		SslBridging:              backend.SslBridging,
 		ForwardPort:              backend.ForwardPort,
 		ForwardPortAlgorithm:     backend.ForwardPortAlgorithm,
 		StickySessions:           backend.StickySessions,
@@ -1483,7 +1505,7 @@ func (l *loadbalancers) updateBackend(service *v1.Service, loadbalancer *scwlb.L
 	return b, nil
 }
 
-// createBackend creates a frontend on the load balancer
+// createFrontend creates a frontend on the load balancer
 func (l *loadbalancers) createFrontend(service *v1.Service, loadbalancer *scwlb.LB, frontend *scwlb.Frontend, backend *scwlb.Backend) (*scwlb.Frontend, error) {
 	f, err := l.api.CreateFrontend(&scwlb.ZonedAPICreateFrontendRequest{
 		Zone:           loadbalancer.Zone,
@@ -1499,7 +1521,7 @@ func (l *loadbalancers) createFrontend(service *v1.Service, loadbalancer *scwlb.
 	return f, err
 }
 
-// updateBackend updates a frontend on the load balancer
+// updateFrontend updates a frontend on the load balancer
 func (l *loadbalancers) updateFrontend(service *v1.Service, loadbalancer *scwlb.LB, frontend *scwlb.Frontend, backend *scwlb.Backend) (*scwlb.Frontend, error) {
 	f, err := l.api.UpdateFrontend(&scwlb.ZonedAPIUpdateFrontendRequest{
 		Zone:           loadbalancer.Zone,
@@ -1524,8 +1546,8 @@ func stringArrayEqual(got, want []string) bool {
 
 // stringPtrArrayEqual returns true if both arrays contains the exact same elements regardless of the order
 func stringPtrArrayEqual(got, want []*string) bool {
-	slices.SortStableFunc(got, func(a, b *string) bool { return *a < *b })
-	slices.SortStableFunc(want, func(a, b *string) bool { return *a < *b })
+	slices.SortStableFunc(got, func(a, b *string) int { return strings.Compare(*a, *b) })
+	slices.SortStableFunc(want, func(a, b *string) int { return strings.Compare(*a, *b) })
 	return reflect.DeepEqual(got, want)
 }
 
@@ -1643,4 +1665,11 @@ func ptrInt32ToString(i *int32) string {
 		return "<nil>"
 	}
 	return fmt.Sprintf("%d", *i)
+}
+
+func ptrBoolToString(b *bool) string {
+	if b == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("%t", *b)
 }

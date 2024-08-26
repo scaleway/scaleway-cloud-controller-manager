@@ -48,7 +48,19 @@ func newFakeInstanceAPI() *fakeInstanceAPI {
 					Address: net.ParseIP("62.210.16.2"),
 					Dynamic: false,
 				},
-				EnableIPv6: true,
+				PublicIPs: []*scwinstance.ServerIP{
+					{
+						Address:          net.ParseIP("62.210.16.2"),
+						ProvisioningMode: scwinstance.ServerIPProvisioningModeDHCP,
+						Family:           scwinstance.ServerIPIPFamilyInet,
+					},
+					{
+						Address:          net.ParseIP("ff::"),
+						ProvisioningMode: scwinstance.ServerIPProvisioningModeDHCP,
+						Family:           scwinstance.ServerIPIPFamilyInet6,
+					},
+				},
+				EnableIPv6: scw.BoolPtr(true),
 				IPv6: &scwinstance.ServerIPv6{
 					Address: net.ParseIP("2001:bc8:4::1"),
 					Gateway: net.ParseIP("2001:bc8:4::"),
@@ -67,7 +79,19 @@ func newFakeInstanceAPI() *fakeInstanceAPI {
 					Address: net.ParseIP("62.210.16.2"),
 					Dynamic: false,
 				},
-				EnableIPv6: true,
+				PublicIPs: []*scwinstance.ServerIP{
+					{
+						Address:          net.ParseIP("ff::"),
+						ProvisioningMode: scwinstance.ServerIPProvisioningModeDHCP,
+						Family:           scwinstance.ServerIPIPFamilyInet6,
+					},
+					{
+						Address:          net.ParseIP("62.210.16.2"),
+						ProvisioningMode: scwinstance.ServerIPProvisioningModeDHCP,
+						Family:           scwinstance.ServerIPIPFamilyInet,
+					},
+				},
+				EnableIPv6: scw.BoolPtr(true),
 				IPv6: &scwinstance.ServerIPv6{
 					Address: net.ParseIP("2001:bc8:4::1"),
 					Gateway: net.ParseIP("2001:bc8:4::"),
@@ -82,7 +106,7 @@ func newFakeInstanceAPI() *fakeInstanceAPI {
 				State:          scwinstance.ServerStateRunning,
 				PrivateIP:      scw.StringPtr("10.14.0.1"),
 				PublicIP:       nil,
-				EnableIPv6:     true,
+				EnableIPv6:     scw.BoolPtr(true),
 				IPv6: &scwinstance.ServerIPv6{
 					Address: net.ParseIP("2001:bc8:4::1"),
 					Gateway: net.ParseIP("2001:bc8:4::"),
