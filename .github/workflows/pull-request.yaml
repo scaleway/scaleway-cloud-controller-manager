@@ -11,14 +11,15 @@ jobs:
         platform: [ubuntu-latest]
     runs-on: ${{ matrix.platform }}
     steps:
-    - name: Install Go
-      uses: actions/setup-go@v1
-      with:
-        go-version: ${{ matrix.go-version }}
+    # Checkout should always be before setup-go to ensure caching is working
     - name: checkout
       uses: actions/checkout@v3
       with:
         fetch-depth: 1
+    - name: Install Go
+      uses: actions/setup-go@v1
+      with:
+        go-version: ${{ matrix.go-version }}
     - name: Run unit tests
       run: make test
   build-test:
@@ -29,13 +30,14 @@ jobs:
         arch: [386, amd64, arm, arm64]
     runs-on: ${{ matrix.platform }}
     steps:
-    - name: Install Go
-      uses: actions/setup-go@v1
-      with:
-        go-version: ${{ matrix.go-version }}
+    # Checkout should always be before setup-go to ensure caching is working
     - name: checkout
       uses: actions/checkout@v2
       with:
         fetch-depth: 1
+    - name: Install Go
+      uses: actions/setup-go@v1
+      with:
+        go-version: ${{ matrix.go-version }}
     - name: Building binary
       run: GOARCH=${{ matrix.arch }} make compile
