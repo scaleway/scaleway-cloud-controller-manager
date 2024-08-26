@@ -4,7 +4,7 @@ The CCM has a simple build system based on make.
 
 ## Requirements
 
-- Go (1.21+)
+- Go (1.22+)
 - make
 - docker
 
