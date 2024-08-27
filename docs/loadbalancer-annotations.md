@@ -53,6 +53,10 @@ The default is the first zone of the cluster's region.
 This is the annotation to set the time between two consecutive health checks.
 The default value is `5s`. The duration are go's time.Duration (ex: `1s`, `2m`, `4h`, ...).
 
+### `service.beta.kubernetes.io/scw-loadbalancer-health-check-send-proxy`
+This is the annotation to control if proxy protocol should be activated for the health check.
+The default value is `false`.
+
 ### `service.beta.kubernetes.io/scw-loadbalancer-health-transient-check-delay`
 This is the annotation to set the time between two consecutive health checks in a transient state (going UP or DOWN).
 The default value is `0.5s`. The duration are go's time.Duration (ex: `1s`, `2m`, `4h`, ...).

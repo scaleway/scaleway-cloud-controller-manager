@@ -1061,6 +1061,12 @@ func servicePortToBackend(service *v1.Service, loadbalancer *scwlb.LB, port v1.S
 	}
 	healthCheck.TransientCheckDelay = healthCheckTransientCheckDelay
 
+	healthCheckSendProxy, err := getHealthCheckSendProxy(service)
+	if err != nil {
+		return nil, err
+	}
+	healthCheck.CheckSendProxy = healthCheckSendProxy
+
 	healthCheckType, err := getHealthCheckType(service, port.NodePort)
 	if err != nil {
 		return nil, err
