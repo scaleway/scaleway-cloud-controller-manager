@@ -211,6 +211,8 @@ func (s *servers) InstanceShutdown(ctx context.Context, node *v1.Node) (bool, er
 // translated into specific fields in the Node object on registration.
 // Use the node.name or node.spec.providerID field to find the node in the cloud provider.
 func (s *servers) InstanceMetadata(ctx context.Context, node *v1.Node) (*cloudprovider.InstanceMetadata, error) {
+	providerID := node.Spec.ProviderID
+
 	if address, ok := node.Labels[nodeLabelNodePublicIP]; ok {
 		addresses := []v1.NodeAddress{
 			{Type: v1.NodeExternalIP, Address: address},
@@ -222,17 +224,22 @@ func (s *servers) InstanceMetadata(ctx context.Context, node *v1.Node) (*cloudpr
 			}
 		}
 
+		if providerID == "" {
+			providerID = fmt.Sprintf("scaleway://external/%s", node.GetUID())
+		}
+
 		return &cloudprovider.InstanceMetadata{
+			ProviderID:    providerID,
 			NodeAddresses: addresses,
 		}, nil
 	}
 
-	if node.Spec.ProviderID == "" {
+	if providerID == "" {
 		metadata, err := s.instances.InstanceMetadata(ctx, node)
 		if err == cloudprovider.InstanceNotFound {
 			return s.baremetal.InstanceMetadata(ctx, node)
 		}
 		return metadata, err
 	}
-	return s.getImplementationByProviderID(node.Spec.ProviderID).InstanceMetadata(ctx, node)
+	return s.getImplementationByProviderID(providerID).InstanceMetadata(ctx, node)
 }
