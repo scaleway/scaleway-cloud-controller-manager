@@ -31,7 +31,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 
-	scwipam "github.com/scaleway/scaleway-sdk-go/api/ipam/v1alpha1"
+	scwipam "github.com/scaleway/scaleway-sdk-go/api/ipam/v1"
 	scwlb "github.com/scaleway/scaleway-sdk-go/api/lb/v1"
 	scwvpc "github.com/scaleway/scaleway-sdk-go/api/vpc/v2"
 	"github.com/scaleway/scaleway-sdk-go/scw"
