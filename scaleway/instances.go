@@ -21,7 +21,7 @@ import (
 	"fmt"
 
 	scwinstance "github.com/scaleway/scaleway-sdk-go/api/instance/v1"
-	scwipam "github.com/scaleway/scaleway-sdk-go/api/ipam/v1alpha1"
+	scwipam "github.com/scaleway/scaleway-sdk-go/api/ipam/v1"
 	"github.com/scaleway/scaleway-sdk-go/scw"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
