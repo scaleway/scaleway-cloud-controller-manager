@@ -27,6 +27,7 @@ import (
 	"github.com/scaleway/scaleway-sdk-go/scw"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/cloud-provider/api"
 )
 
 func TestGetValueForPort(t *testing.T) {
@@ -1397,6 +1398,84 @@ func Test_hasEqualLoadBalancerStaticIPs(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := hasEqualLoadBalancerStaticIPs(tt.args.service, tt.args.lb); got != tt.want {
 				t.Errorf("hasEqualLoadBalancerStaticIPs() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_nodesInitialized(t *testing.T) {
+	type args struct {
+		nodes []*v1.Node
+	}
+	tests := []struct {
+		name    string
+		args    args
+		wantErr bool
+	}{
+		{
+			name: "node initialized",
+			args: args{
+				nodes: []*v1.Node{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "test",
+						},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "node not initialized but created 5 minutes ago",
+			args: args{
+				nodes: []*v1.Node{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:              "test",
+							CreationTimestamp: metav1.NewTime(time.Now().Add(-5 * time.Minute)),
+						},
+						Spec: v1.NodeSpec{
+							Taints: []v1.Taint{
+								{
+									Key:    api.TaintExternalCloudProvider,
+									Value:  "true",
+									Effect: v1.TaintEffectNoSchedule,
+								},
+							},
+						},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "node not initialized, created 10 seconds ago",
+			args: args{
+				nodes: []*v1.Node{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:              "test",
+							CreationTimestamp: metav1.NewTime(time.Now().Add(-10 * time.Second)),
+						},
+						Spec: v1.NodeSpec{
+							Taints: []v1.Taint{
+								{
+									Key:    api.TaintExternalCloudProvider,
+									Value:  "true",
+									Effect: v1.TaintEffectNoSchedule,
+								},
+							},
+						},
+					},
+				},
+			},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := nodesInitialized(tt.args.nodes); (err != nil) != tt.wantErr {
+				t.Errorf("nodesInitialized() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}
