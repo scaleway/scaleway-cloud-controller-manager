@@ -183,6 +183,16 @@ const (
 	// * Will refuse to manage a LB with a name starting with the cluster id.
 	// This annotation requires `service.beta.kubernetes.io/scw-loadbalancer-id` to be set to a valid existing LB.
 	serviceAnnotationLoadBalancerExternallyManaged = "service.beta.kubernetes.io/scw-loadbalancer-externally-managed"
+
+	// serviceAnnotationLoadBalancerIPIDs is the annotation to statically set the IPs of the loadbalancer.
+	// It is possible to provide a single IP ID, or a comma delimited list of IP IDs.
+	// You can provide at most one IPv4 and one IPv6. You must set at least one IPv4.
+	// This annotation takes priority over the deprecated spec.loadBalancerIP field.
+	// Changing the IPs will result in the re-creation of the LB.
+	// The possible formats are:
+	// "<ip-id>": will attach a single IP to the LB.
+	// "<ip-id>,<ip-id>": will attach the two IPs to the LB.
+	serviceAnnotationLoadBalancerIPIDs = "service.beta.kubernetes.io/scw-loadbalancer-ip-ids"
 )
 
 func getLoadBalancerID(service *v1.Service) (scw.Zone, string, error) {
@@ -243,6 +253,15 @@ func getStickySessionsCookieName(service *v1.Service) (string, error) {
 	}
 
 	return stickySessionsCookieName, nil
+}
+
+func getIPIDs(service *v1.Service) []string {
+	ipIDs := service.Annotations[serviceAnnotationLoadBalancerIPIDs]
+	if ipIDs == "" {
+		return nil
+	}
+
+	return strings.Split(ipIDs, ",")
 }
 
 func getSendProxyV2(service *v1.Service, nodePort int32) (scwlb.ProxyProtocol, error) {

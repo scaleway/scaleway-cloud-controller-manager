@@ -1255,3 +1255,149 @@ func deepCloneBackend(original *scwlb.Backend) *scwlb.Backend {
 
 	return clone
 }
+
+func Test_hasEqualLoadBalancerStaticIPs(t *testing.T) {
+	type args struct {
+		service *v1.Service
+		lb      *scwlb.LB
+	}
+	tests := []struct {
+		name string
+		args args
+		want bool
+	}{
+		{
+			name: "no static ip set",
+			args: args{
+				service: &v1.Service{},
+				lb:      &scwlb.LB{},
+			},
+			want: true,
+		},
+		{
+			name: "static ip set with field but mismatch",
+			args: args{
+				service: &v1.Service{
+					Spec: v1.ServiceSpec{
+						LoadBalancerIP: "127.0.0.1",
+					},
+				},
+				lb: &scwlb.LB{
+					IP: []*scwlb.IP{
+						{
+							IPAddress: "127.0.0.2",
+						},
+					},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "static ip set with field match",
+			args: args{
+				service: &v1.Service{
+					Spec: v1.ServiceSpec{
+						LoadBalancerIP: "127.0.0.1",
+					},
+				},
+				lb: &scwlb.LB{
+					IP: []*scwlb.IP{
+						{
+							IPAddress: "127.0.0.1",
+						},
+					},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "static ip set with annotation mismatch",
+			args: args{
+				service: &v1.Service{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{serviceAnnotationLoadBalancerIPIDs: "fakeid"},
+					},
+				},
+				lb: &scwlb.LB{
+					IP: []*scwlb.IP{
+						{
+							ID: "fakeid",
+						},
+					},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "static ip set with annotation, count mismatch",
+			args: args{
+				service: &v1.Service{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{serviceAnnotationLoadBalancerIPIDs: "fakeid1,fakeid2"},
+					},
+				},
+				lb: &scwlb.LB{
+					IP: []*scwlb.IP{
+						{
+							ID: "fakeid1",
+						},
+					},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "static ip set with annotation, match many",
+			args: args{
+				service: &v1.Service{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{serviceAnnotationLoadBalancerIPIDs: "fakeid1,fakeid2"},
+					},
+				},
+				lb: &scwlb.LB{
+					IP: []*scwlb.IP{
+						{
+							ID: "fakeid1",
+						},
+						{
+							ID: "fakeid2",
+						},
+					},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "static ip set with annotation, ignore field",
+			args: args{
+				service: &v1.Service{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{serviceAnnotationLoadBalancerIPIDs: "fakeid1,fakeid2"},
+					},
+					Spec: v1.ServiceSpec{
+						LoadBalancerIP: "127.0.0.1",
+					},
+				},
+				lb: &scwlb.LB{
+					IP: []*scwlb.IP{
+						{
+							ID:        "fakeid1",
+							IPAddress: "127.0.0.2",
+						},
+						{
+							ID: "fakeid2",
+						},
+					},
+				},
+			},
+			want: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := hasEqualLoadBalancerStaticIPs(tt.args.service, tt.args.lb); got != tt.want {
+				t.Errorf("hasEqualLoadBalancerStaticIPs() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
