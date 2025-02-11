@@ -28,6 +28,7 @@ import (
 
 	"golang.org/x/exp/slices"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/cloud-provider/api"
 	"k8s.io/klog/v2"
 
 	scwipam "github.com/scaleway/scaleway-sdk-go/api/ipam/v1"
@@ -580,6 +581,10 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 	if err != nil {
 		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerExternallyManaged)
 		return fmt.Errorf("invalid value for annotation %s: expected boolean", serviceAnnotationLoadBalancerExternallyManaged)
+	}
+
+	if err := nodesInitialized(nodes); err != nil {
+		return err
 	}
 
 	nodes = filterNodes(service, nodes)
@@ -1726,4 +1731,23 @@ func hasEqualLoadBalancerStaticIPs(service *v1.Service, lb *scwlb.LB) bool {
 	}
 
 	return true
+}
+
+// nodesInitialized verifies that all nodes are initialized before using them as LoadBalancer targets.
+func nodesInitialized(nodes []*v1.Node) error {
+	for _, node := range nodes {
+		// If node was created more than 3 minutes ago, we ignore it to
+		// avoid blocking callers indefinitely.
+		if time.Since(node.CreationTimestamp.Time) > 3*time.Minute {
+			continue
+		}
+
+		if slices.ContainsFunc(node.Spec.Taints, func(taint v1.Taint) bool {
+			return taint.Key == api.TaintExternalCloudProvider
+		}) {
+			return fmt.Errorf("node %s is not yet initialized", node.Name)
+		}
+	}
+
+	return nil
 }
