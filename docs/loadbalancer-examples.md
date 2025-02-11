@@ -87,16 +87,18 @@ _Warning: LoadBalancer ips are different from Instance ips. You cannot use an in
 To reserve a loadbalancer IP through API :
 ```bash
 curl -X POST "https://api.scaleway.com/lb/v1/regions/$SCW_DEFAULT_REGION/ips" -H "X-Auth-Token: $SCW_SECRET_KEY" -H "Content-Type: application/json" \
--d "{\"organization_id\":\"$SCW_DEFAULT_ORGANIZATION_ID\"} | jq -r .ip_address"
+-d "{\"organization_id\":\"$SCW_DEFAULT_ORGANIZATION_ID\"} | jq -r .id"
 ```
 
-Now specify this IP address to spec.loadBalancerIP field of the service
+Now specify the ID of this IP address in the `service.beta.kubernetes.io/scw-loadbalancer-ip-ids` annotation.
 
 ```yaml
 kind: Service
 apiVersion: v1
 metadata:
   name: demo-nginx
+  annotations:
+    service.beta.kubernetes.io/scw-loadbalancer-ip-ids: IP_ID
 spec:
   selector:
     app: demo-nginx
@@ -105,7 +107,6 @@ spec:
   - name: http
     port: 80
     targetPort: 80
-  loadBalancerIP: SCW.LB.IP.ADDR
 ```
 
 ## Convert an ephemeral IP into reserved IP
@@ -114,7 +115,8 @@ It's possible to keep an ephemeral address (converting into a reserved address) 
 
 ```bash
 export CURRENT_EXTERNAL_IP=$(kubectl get svc $SERVICE_NAME -o json | jq -r .status.loadBalancer.ingress[0].ip)
-kubectl patch svc $SERVICE_NAME --type merge --patch "{\"spec\":{\"loadBalancerIP\": \"$CURRENT_EXTERNAL_IP\"}}"
+export CURRENT_EXTERNAL_IP_ID=$(curl -s "https://api.scaleway.com/lb/v1/regions/$SCW_DEFAULT_REGION/ips?ip_address=${CURRENT_EXTERNAL_IP}" -H "X-Auth-Token: $SCW_SECRET_KEY" | jq -r .ips[0].id)
+kubectl patch svc $SERVICE_NAME --type merge --patch "{\"metadata\":{\"annotations\": {\"service.beta.kubernetes.io/scw-loadbalancer-ip-ids\": \"$CURRENT_EXTERNAL_IP_ID\"}}}"
 ```
 
 This way, the ephemeral ip would not be deleted when the service will be deleted and could be reused in another service.

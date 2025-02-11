@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"reflect"
 	"strconv"
@@ -155,8 +154,9 @@ func (l *loadbalancers) EnsureLoadBalancer(ctx context.Context, clusterName stri
 	if lbPrivate && l.pnID == "" {
 		return nil, fmt.Errorf("scaleway-cloud-controller-manager cannot create private load balancers without a private network")
 	}
-	if lbPrivate && service.Spec.LoadBalancerIP != "" {
-		return nil, fmt.Errorf("scaleway-cloud-controller-manager can only handle .spec.LoadBalancerIP for public load balancers. Unsetting the .spec.LoadBalancerIP can result in the loss of the IP")
+
+	if lbPrivate && hasLoadBalancerStaticIPs(service) {
+		return nil, fmt.Errorf("scaleway-cloud-controller-manager can only handle static IPs for public load balancers. Unsetting the static IP can result in the loss of the IP")
 	}
 
 	lb, err := l.fetchLoadBalancer(ctx, clusterName, service)
@@ -177,7 +177,7 @@ func (l *loadbalancers) EnsureLoadBalancer(ctx context.Context, clusterName stri
 
 	if !lbExternallyManaged {
 		privateModeMismatch := lbPrivate != (len(lb.IP) == 0)
-		reservedIPMismatch := service.Spec.LoadBalancerIP != "" && service.Spec.LoadBalancerIP != lb.IP[0].IPAddress
+		reservedIPMismatch := hasLoadBalancerStaticIPs(service) && !hasEqualLoadBalancerStaticIPs(service, lb)
 		if privateModeMismatch || reservedIPMismatch {
 			err = l.deleteLoadBalancer(ctx, lb, clusterName, service)
 			if err != nil {
@@ -327,13 +327,10 @@ func (l *loadbalancers) deleteLoadBalancer(ctx context.Context, lb *scwlb.LB, cl
 		return nil
 	}
 
-	// if loadBalancerIP is not set, it implies an ephemeral IP
-	releaseIP := service.Spec.LoadBalancerIP == ""
-
 	request := &scwlb.ZonedAPIDeleteLBRequest{
 		Zone:      lb.Zone,
 		LBID:      lb.ID,
-		ReleaseIP: releaseIP,
+		ReleaseIP: !hasLoadBalancerStaticIPs(service), // if no static IP is set, it implies an ephemeral IP
 	}
 
 	err := l.api.DeleteLB(request)
@@ -471,27 +468,12 @@ func (l *loadbalancers) createLoadBalancer(ctx context.Context, clusterName stri
 	}
 
 	// Attach specific IP if set
-	var ipID *string
-	if !lbPrivate && service.Spec.LoadBalancerIP != "" {
-		request := scwlb.ZonedAPIListIPsRequest{
-			IPAddress: &service.Spec.LoadBalancerIP,
-			Zone:      getLoadBalancerZone(service),
-		}
-		ipsResp, err := l.api.ListIPs(&request)
+	var ipIDs []string
+	if !lbPrivate {
+		ipIDs, err = l.getLoadBalancerStaticIPIDs(service)
 		if err != nil {
-			klog.Errorf("error getting ip for service %s/%s: %v", service.Namespace, service.Name, err)
-			return nil, fmt.Errorf("createLoadBalancer: error getting ip for service %s: %s", service.Name, err.Error())
+			return nil, err
 		}
-
-		if len(ipsResp.IPs) == 0 {
-			return nil, IPAddressNotFound
-		}
-
-		if ipsResp.IPs[0].LBID != nil && *ipsResp.IPs[0].LBID != "" {
-			return nil, IPAddressInUse
-		}
-
-		ipID = &ipsResp.IPs[0].ID
 	}
 
 	lbName := l.GetLoadBalancerName(ctx, clusterName, service)
@@ -511,13 +493,15 @@ func (l *loadbalancers) createLoadBalancer(ctx context.Context, clusterName stri
 	tags = append(tags, "managed-by-scaleway-cloud-controller-manager")
 
 	request := scwlb.ZonedAPICreateLBRequest{
-		Zone:             getLoadBalancerZone(service),
-		Name:             lbName,
-		Description:      "kubernetes service " + service.Name,
-		Tags:             tags,
-		IPID:             ipID,
-		Type:             lbType,
-		AssignFlexibleIP: scw.BoolPtr(!lbPrivate),
+		Zone:        getLoadBalancerZone(service),
+		Name:        lbName,
+		Description: "kubernetes service " + service.Name,
+		Tags:        tags,
+		IPIDs:       ipIDs,
+		Type:        lbType,
+		// We must only assign a flexible IP if LB is public AND no IP ID is provided.
+		// If IP IDs are provided, there must be at least one IPv4.
+		AssignFlexibleIP: scw.BoolPtr(!lbPrivate && len(ipIDs) == 0),
 	}
 	lb, err := l.api.CreateLB(&request)
 	if err != nil {
@@ -531,6 +515,38 @@ func (l *loadbalancers) createLoadBalancer(ctx context.Context, clusterName stri
 	}
 
 	return lb, nil
+}
+
+// getLoadBalancerStaticIPIDs returns user-provided static IPs for the LB from annotations.
+// If no annotation is found, it uses the LoadBalancerIP field from service spec.
+// It returns nil if user provided no static IP. In this case, the CCM must manage a dynamic IP.
+func (l *loadbalancers) getLoadBalancerStaticIPIDs(service *v1.Service) ([]string, error) {
+	if ipIDs := getIPIDs(service); len(ipIDs) > 0 {
+		return ipIDs, nil
+	}
+
+	if service.Spec.LoadBalancerIP != "" {
+		ipsResp, err := l.api.ListIPs(&scwlb.ZonedAPIListIPsRequest{
+			IPAddress: &service.Spec.LoadBalancerIP,
+			Zone:      getLoadBalancerZone(service),
+		})
+		if err != nil {
+			klog.Errorf("error getting ip for service %s/%s: %v", service.Namespace, service.Name, err)
+			return nil, fmt.Errorf("createLoadBalancer: error getting ip for service %s: %s", service.Name, err.Error())
+		}
+
+		if len(ipsResp.IPs) == 0 {
+			return nil, IPAddressNotFound
+		}
+
+		if ipsResp.IPs[0].LBID != nil && *ipsResp.IPs[0].LBID != "" {
+			return nil, IPAddressInUse
+		}
+
+		return []string{ipsResp.IPs[0].ID}, nil
+	}
+
+	return nil, nil
 }
 
 // annotateAndPatch adds the loadbalancer id to the service's annotations
@@ -854,11 +870,6 @@ func (l *loadbalancers) createPublicServiceStatus(service *v1.Service, lb *scwlb
 	status := &v1.LoadBalancerStatus{}
 	status.Ingress = make([]v1.LoadBalancerIngress, 0)
 	for _, ip := range lb.IP {
-		// Skip ipv6 entries
-		if i := net.ParseIP(ip.IPAddress); i.To4() == nil {
-			continue
-		}
-
 		if getUseHostname(service) {
 			status.Ingress = append(status.Ingress, v1.LoadBalancerIngress{Hostname: ip.Reverse})
 		} else {
@@ -867,7 +878,7 @@ func (l *loadbalancers) createPublicServiceStatus(service *v1.Service, lb *scwlb
 	}
 
 	if len(status.Ingress) == 0 {
-		return nil, fmt.Errorf("no ipv4 found for lb %s", lb.Name)
+		return nil, fmt.Errorf("no ip found for lb %s", lb.Name)
 	}
 
 	return status, nil
@@ -1672,4 +1683,47 @@ func ptrBoolToString(b *bool) string {
 		return "<nil>"
 	}
 	return fmt.Sprintf("%t", *b)
+}
+
+// hasLoadBalancerStaticIPs returns true if static IPs are specified for the loadbalancer.
+func hasLoadBalancerStaticIPs(service *v1.Service) bool {
+	if ipIDs := getIPIDs(service); len(ipIDs) > 0 {
+		return true
+	}
+
+	if service.Spec.LoadBalancerIP != "" {
+		return true
+	}
+
+	return false
+}
+
+// hasEqualLoadBalancerStaticIPs returns true if the LB has the expected static IPs.
+// This function returns true if no static IP is configured.
+func hasEqualLoadBalancerStaticIPs(service *v1.Service, lb *scwlb.LB) bool {
+	if ipIDs := getIPIDs(service); len(ipIDs) > 0 {
+		if len(ipIDs) != len(lb.IP) {
+			return false
+		}
+
+		// Sort IP IDs.
+		sortedIPIDs := slices.Clone(ipIDs)
+		slices.Sort(sortedIPIDs)
+
+		// Sort LB IP IDs.
+		sortedLBIPIDs := make([]string, 0, len(lb.IP))
+		for _, ip := range lb.IP {
+			sortedLBIPIDs = append(sortedLBIPIDs, ip.ID)
+		}
+		slices.Sort(sortedLBIPIDs)
+
+		// Compare the sorted list.
+		return reflect.DeepEqual(sortedIPIDs, sortedLBIPIDs)
+	}
+
+	if lbIP := service.Spec.LoadBalancerIP; lbIP != "" {
+		return len(lb.IP) == 1 && lbIP == lb.IP[0].IPAddress
+	}
+
+	return true
 }

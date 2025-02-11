@@ -185,3 +185,14 @@ When set to `true`, this annotation makes the following changes in behavior:
 
 This annotation requires `service.beta.kubernetes.io/scw-loadbalancer-id` to be set to a valid existing LB.
 > Please note that this annotation is experimental and may not be supported.
+
+### `service.beta.kubernetes.io/scw-loadbalancer-ip-ids`
+
+This is the annotation to statically set the IPs of the loadbalancer.
+It is possible to provide a single IP ID, or a comma delimited list of IP IDs.
+You can provide at most one IPv4 and one IPv6. You must set at least one IPv4.
+This annotation takes priority over the deprecated spec.loadBalancerIP field.
+Changing the IPs will result in the re-creation of the LB.
+The possible formats are:
+- `<ip-id>`: will attach a single IP to the LB.
+- `<ip-id>,<ip-id>`: will attach the two IPs to the LB.
