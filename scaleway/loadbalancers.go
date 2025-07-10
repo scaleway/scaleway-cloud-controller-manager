@@ -30,6 +30,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/cloud-provider/api"
 	"k8s.io/klog/v2"
+	"k8s.io/utils/ptr"
 
 	scwipam "github.com/scaleway/scaleway-sdk-go/api/ipam/v1"
 	scwlb "github.com/scaleway/scaleway-sdk-go/api/lb/v1"
@@ -819,7 +820,7 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 }
 
 // createPrivateServiceStatus creates a LoadBalancer status for services with private load balancers
-func (l *loadbalancers) createPrivateServiceStatus(service *v1.Service, lb *scwlb.LB) (*v1.LoadBalancerStatus, error) {
+func (l *loadbalancers) createPrivateServiceStatus(service *v1.Service, lb *scwlb.LB, ipMode *v1.LoadBalancerIPMode) (*v1.LoadBalancerStatus, error) {
 	if l.pnID == "" {
 		return nil, fmt.Errorf("cannot create a status for service %s/%s: a private load balancer requires a private network", service.Namespace, service.Name)
 	}
@@ -843,6 +844,7 @@ func (l *loadbalancers) createPrivateServiceStatus(service *v1.Service, lb *scwl
 		status.Ingress = []v1.LoadBalancerIngress{
 			{
 				Hostname: fmt.Sprintf("%s.%s", lb.ID, pn.Name),
+				IPMode:   ipMode,
 			},
 		}
 	} else {
@@ -864,6 +866,7 @@ func (l *loadbalancers) createPrivateServiceStatus(service *v1.Service, lb *scwl
 		status.Ingress = make([]v1.LoadBalancerIngress, len(ipamRes.IPs))
 		for idx, ip := range ipamRes.IPs {
 			status.Ingress[idx].IP = ip.Address.IP.String()
+			status.Ingress[idx].IPMode = ipMode
 		}
 	}
 
@@ -871,14 +874,14 @@ func (l *loadbalancers) createPrivateServiceStatus(service *v1.Service, lb *scwl
 }
 
 // createPublicServiceStatus creates a LoadBalancer status for services with public load balancers
-func (l *loadbalancers) createPublicServiceStatus(service *v1.Service, lb *scwlb.LB) (*v1.LoadBalancerStatus, error) {
+func (l *loadbalancers) createPublicServiceStatus(service *v1.Service, lb *scwlb.LB, ipMode *v1.LoadBalancerIPMode) (*v1.LoadBalancerStatus, error) {
 	status := &v1.LoadBalancerStatus{}
 	status.Ingress = make([]v1.LoadBalancerIngress, 0)
 	for _, ip := range lb.IP {
 		if getUseHostname(service) {
-			status.Ingress = append(status.Ingress, v1.LoadBalancerIngress{Hostname: ip.Reverse})
+			status.Ingress = append(status.Ingress, v1.LoadBalancerIngress{Hostname: ip.Reverse, IPMode: ipMode})
 		} else {
-			status.Ingress = append(status.Ingress, v1.LoadBalancerIngress{IP: ip.IPAddress})
+			status.Ingress = append(status.Ingress, v1.LoadBalancerIngress{IP: ip.IPAddress, IPMode: ipMode})
 		}
 	}
 
@@ -897,11 +900,54 @@ func (l *loadbalancers) createServiceStatus(service *v1.Service, lb *scwlb.LB) (
 		return nil, fmt.Errorf("invalid value for annotation %s: expected boolean", serviceAnnotationLoadBalancerPrivate)
 	}
 
-	if lbPrivate {
-		return l.createPrivateServiceStatus(service, lb)
+	ipMode, err := ipMode(service)
+	if err != nil {
+		return nil, err
 	}
 
-	return l.createPublicServiceStatus(service, lb)
+	if lbPrivate {
+		return l.createPrivateServiceStatus(service, lb, ipMode)
+	}
+
+	return l.createPublicServiceStatus(service, lb, ipMode)
+}
+
+// ipMode returns the LoadBalancer IP Mode to use for the service.
+// It returns Proxy when there is at least one port set on the service
+// and ALL the ports are configured with proxy protocol. Otherwise, it
+// returns VIP.
+// The user can set the "service.beta.kubernetes.io/scw-loadbalancer-ip-mode" annotation
+// to bypass the previous logic and override the ipMode.
+func ipMode(service *v1.Service) (*v1.LoadBalancerIPMode, error) {
+	// If the user did set the IPMode value manually, we should use it.
+	if ipMode := getLoadBalancerIPMode(service); ipMode != nil {
+		return ipMode, nil
+	}
+
+	if len(service.Spec.Ports) == 0 {
+		return ptr.To(v1.LoadBalancerIPModeVIP), nil
+	}
+
+	ppCount := 0
+	for _, port := range service.Spec.Ports {
+		proxyProtocol, err := getProxyProtocol(service, port.NodePort)
+		if err != nil {
+			return nil, err
+		}
+
+		if slices.Contains([]scwlb.ProxyProtocol{
+			scwlb.ProxyProtocolProxyProtocolV1,
+			scwlb.ProxyProtocolProxyProtocolV2,
+		}, proxyProtocol) {
+			ppCount++
+		}
+	}
+
+	if ppCount == len(service.Spec.Ports) {
+		return ptr.To(v1.LoadBalancerIPModeProxy), nil
+	}
+
+	return ptr.To(v1.LoadBalancerIPModeVIP), nil
 }
 
 func isPortInRange(r string, p int32) (bool, error) {

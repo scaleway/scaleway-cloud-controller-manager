@@ -10,6 +10,7 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
+	"k8s.io/utils/ptr"
 
 	scwlb "github.com/scaleway/scaleway-sdk-go/api/lb/v1"
 	"github.com/scaleway/scaleway-sdk-go/scw"
@@ -193,6 +194,14 @@ const (
 	// "<ip-id>": will attach a single IP to the LB.
 	// "<ip-id>,<ip-id>": will attach the two IPs to the LB.
 	serviceAnnotationLoadBalancerIPIDs = "service.beta.kubernetes.io/scw-loadbalancer-ip-ids"
+
+	// serviceAnnotationLoadBalancerIPMode is the annotation to manually set the
+	// .status.loadBalancer.ingress.ipMode field of the service. The accepted values
+	// are "Proxy" and "VIP". Please refer to this article for more information about IPMode:
+	// https://kubernetes.io/blog/2023/12/18/kubernetes-1-29-feature-loadbalancer-ip-mode-alpha/.
+	// When proxy-protocol is enabled on ALL the ports of the service, the ipMode
+	// is automatically set to "Proxy". You can use this annotation to override this.
+	serviceAnnotationLoadBalancerIPMode = "service.beta.kubernetes.io/scw-loadbalancer-ip-mode"
 )
 
 func getLoadBalancerID(service *v1.Service) (scw.Zone, string, error) {
@@ -902,6 +911,15 @@ func svcExternallyManaged(service *v1.Service) (bool, error) {
 		return false, nil
 	}
 	return strconv.ParseBool(isExternallyManaged)
+}
+
+func getLoadBalancerIPMode(service *v1.Service) *v1.LoadBalancerIPMode {
+	loadBalancerIPMode, ok := service.Annotations[serviceAnnotationLoadBalancerIPMode]
+	if !ok {
+		return nil
+	}
+
+	return ptr.To(v1.LoadBalancerIPMode(loadBalancerIPMode))
 }
 
 // Original version: https://github.com/kubernetes/legacy-cloud-providers/blob/1aa918bf227e52af6f8feb3fa065dabff251a0a3/aws/aws_loadbalancer.go#L117

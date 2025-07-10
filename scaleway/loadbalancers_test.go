@@ -27,7 +27,9 @@ import (
 	"github.com/scaleway/scaleway-sdk-go/scw"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/cloud-provider/api"
+	"k8s.io/utils/ptr"
 )
 
 func TestGetValueForPort(t *testing.T) {
@@ -1476,6 +1478,142 @@ func Test_nodesInitialized(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if err := nodesInitialized(tt.args.nodes); (err != nil) != tt.wantErr {
 				t.Errorf("nodesInitialized() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func Test_ipMode(t *testing.T) {
+	type args struct {
+		service *v1.Service
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    *v1.LoadBalancerIPMode
+		wantErr bool
+	}{
+		{
+			name: "no ports",
+			args: args{
+				service: newFakeService(),
+			},
+			want: ptr.To(v1.LoadBalancerIPModeVIP),
+		},
+		{
+			name: "no proxy protocol",
+			args: args{
+				service: &v1.Service{
+					Spec: v1.ServiceSpec{
+						Ports: []v1.ServicePort{
+							{
+								Port:       80,
+								TargetPort: intstr.FromInt(80),
+								NodePort:   30000,
+							},
+							{
+								Port:       443,
+								TargetPort: intstr.FromInt(443),
+								NodePort:   30001,
+							},
+						},
+					},
+				},
+			},
+			want: ptr.To(v1.LoadBalancerIPModeVIP),
+		},
+		{
+			name: "proxy protocol on one port only",
+			args: args{
+				service: &v1.Service{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							serviceAnnotationLoadBalancerProxyProtocolV2: "80",
+						},
+					},
+					Spec: v1.ServiceSpec{
+						Ports: []v1.ServicePort{
+							{
+								Port:       80,
+								TargetPort: intstr.FromInt(80),
+								NodePort:   30000,
+							},
+							{
+								Port:       443,
+								TargetPort: intstr.FromInt(443),
+								NodePort:   30001,
+							},
+						},
+					},
+				},
+			},
+			want: ptr.To(v1.LoadBalancerIPModeVIP),
+		},
+		{
+			name: "proxy protocol on all ports",
+			args: args{
+				service: &v1.Service{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							serviceAnnotationLoadBalancerProxyProtocolV2: "true",
+						},
+					},
+					Spec: v1.ServiceSpec{
+						Ports: []v1.ServicePort{
+							{
+								Port:       80,
+								TargetPort: intstr.FromInt(80),
+								NodePort:   30000,
+							},
+							{
+								Port:       443,
+								TargetPort: intstr.FromInt(443),
+								NodePort:   30001,
+							},
+						},
+					},
+				},
+			},
+			want: ptr.To(v1.LoadBalancerIPModeProxy),
+		},
+		{
+			name: "proxy protocol on all ports, overriden by annotation",
+			args: args{
+				service: &v1.Service{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							serviceAnnotationLoadBalancerProxyProtocolV2: "true",
+							serviceAnnotationLoadBalancerIPMode:          string(v1.LoadBalancerIPModeVIP),
+						},
+					},
+					Spec: v1.ServiceSpec{
+						Ports: []v1.ServicePort{
+							{
+								Port:       80,
+								TargetPort: intstr.FromInt(80),
+								NodePort:   30000,
+							},
+							{
+								Port:       443,
+								TargetPort: intstr.FromInt(443),
+								NodePort:   30001,
+							},
+						},
+					},
+				},
+			},
+			want: ptr.To(v1.LoadBalancerIPModeVIP),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ipMode(tt.args.service)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ipMode() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("ipMode() = %v, want %v", got, tt.want)
 			}
 		})
 	}
