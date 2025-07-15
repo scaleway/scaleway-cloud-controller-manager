@@ -196,3 +196,11 @@ Changing the IPs will result in the re-creation of the LB.
 The possible formats are:
 - `<ip-id>`: will attach a single IP to the LB.
 - `<ip-id>,<ip-id>`: will attach the two IPs to the LB.
+
+### `service.beta.kubernetes.io/scw-loadbalancer-ip-mode`
+
+This is the annotation to manually set the `.status.loadBalancer.ingress.ipMode` field of the service.
+The accepted values are "Proxy" and "VIP". Please refer to this article for more information about IPMode:
+<https://kubernetes.io/blog/2023/12/18/kubernetes-1-29-feature-loadbalancer-ip-mode-alpha/>.
+When proxy-protocol is enabled on ALL the ports of the service, the ipMode
+is automatically set to "Proxy". You can use this annotation to override this.
