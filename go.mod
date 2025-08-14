@@ -1,16 +1,18 @@
 module github.com/scaleway/scaleway-cloud-controller-manager
 
-go 1.24.5
+go 1.24.0
+
+toolchain go1.24.6
 
 require (
-	github.com/scaleway/scaleway-sdk-go v1.0.0-beta.33
-	golang.org/x/exp v0.0.0-20250620022241-b7579e27df2b
-	google.golang.org/protobuf v1.36.6
-	k8s.io/api v0.33.2
-	k8s.io/apimachinery v0.33.2
-	k8s.io/client-go v0.33.2
-	k8s.io/cloud-provider v0.33.2
-	k8s.io/component-base v0.33.2
+	github.com/scaleway/scaleway-sdk-go v1.0.0-beta.34
+	golang.org/x/exp v0.0.0-20250813145105-42675adae3e6
+	google.golang.org/protobuf v1.36.7
+	k8s.io/api v0.33.4
+	k8s.io/apimachinery v0.33.4
+	k8s.io/client-go v0.33.4
+	k8s.io/cloud-provider v0.33.4
+	k8s.io/component-base v0.33.4
 	k8s.io/klog/v2 v2.130.1
 	k8s.io/utils v0.0.0-20241104100929-3ea5e8cea738
 )
@@ -26,7 +28,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/coreos/go-semver v0.3.1 // indirect
 	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
-	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
+	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/emicklei/go-restful/v3 v3.11.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/fsnotify/fsnotify v1.7.0 // indirect
@@ -81,10 +83,10 @@ require (
 	golang.org/x/crypto v0.36.0 // indirect
 	golang.org/x/net v0.38.0 // indirect
 	golang.org/x/oauth2 v0.27.0 // indirect
-	golang.org/x/sync v0.15.0 // indirect
+	golang.org/x/sync v0.16.0 // indirect
 	golang.org/x/sys v0.31.0 // indirect
 	golang.org/x/term v0.30.0 // indirect
-	golang.org/x/text v0.23.0 // indirect
+	golang.org/x/text v0.26.0 // indirect
 	golang.org/x/time v0.9.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20241209162323-e6fa225c2576 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20241209162323-e6fa225c2576 // indirect
@@ -94,10 +96,10 @@ require (
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	k8s.io/apiserver v0.33.2 // indirect
-	k8s.io/component-helpers v0.33.2 // indirect
-	k8s.io/controller-manager v0.33.2 // indirect
-	k8s.io/kms v0.33.2 // indirect
+	k8s.io/apiserver v0.33.4 // indirect
+	k8s.io/component-helpers v0.33.4 // indirect
+	k8s.io/controller-manager v0.33.4 // indirect
+	k8s.io/kms v0.33.4 // indirect
 	k8s.io/kube-openapi v0.0.0-20250318190949-c8a335a9a2ff // indirect
 	sigs.k8s.io/apiserver-network-proxy/konnectivity-client v0.31.2 // indirect
 	sigs.k8s.io/json v0.0.0-20241010143419-9aa6b5e7a4b3 // indirect
