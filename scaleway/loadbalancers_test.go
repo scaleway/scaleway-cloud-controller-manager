@@ -747,8 +747,13 @@ func TestBackendEquals(t *testing.T) {
 	defaultTimeoutServer, _ := time.ParseDuration("3s")
 	defaultTimeoutConnect, _ := time.ParseDuration("4s")
 	defaultTimeoutTunnel, _ := time.ParseDuration("5s")
+	defaultTimeoutQueueTime, _ := time.ParseDuration("5s")
+	defaultTimeoutQueue := scw.NewDurationFromTimeDuration(defaultTimeoutQueueTime)
 	otherDuration, _ := time.ParseDuration("50m")
+	defaultString := "default"
+	otherString := "other"
 	boolTrue := true
+	boolFalse := false
 	var int0 int32 = 0
 	var int1 int32 = 1
 	var intOther int32 = 5
@@ -782,10 +787,13 @@ func TestBackendEquals(t *testing.T) {
 		TimeoutServer:          &defaultTimeoutServer,
 		TimeoutConnect:         &defaultTimeoutConnect,
 		TimeoutTunnel:          &defaultTimeoutTunnel,
+		TimeoutQueue:           defaultTimeoutQueue,
 		OnMarkedDownAction:     "action",
 		ProxyProtocol:          "proxy",
 		RedispatchAttemptCount: &int0,
+		MaxConnections:         &int1,
 		MaxRetries:             &int1,
+		FailoverHost:           &defaultString,
 	}
 
 	matrix := []struct {
@@ -855,6 +863,15 @@ func TestBackendEquals(t *testing.T) {
 		b    *scwlb.Backend
 		want bool
 	}{"with a different ForwardProtocol", reference, diff, false})
+
+	diff = deepCloneBackend(reference)
+	diff.MaxConnections = &intOther
+	matrix = append(matrix, struct {
+		Name string
+		a    *scwlb.Backend
+		b    *scwlb.Backend
+		want bool
+	}{"with a different MaxConnections", reference, diff, false})
 
 	diff = deepCloneBackend(reference)
 	diff.MaxRetries = &intOther
@@ -945,6 +962,24 @@ func TestBackendEquals(t *testing.T) {
 		b    *scwlb.Backend
 		want bool
 	}{"with a different TimeoutTunnel", reference, diff, false})
+
+	diff = deepCloneBackend(reference)
+	diff.TimeoutQueue = scw.NewDurationFromTimeDuration(otherDuration)
+	matrix = append(matrix, struct {
+		Name string
+		a    *scwlb.Backend
+		b    *scwlb.Backend
+		want bool
+	}{"with a different TimeoutQueue", reference, diff, false})
+
+	diff = deepCloneBackend(reference)
+	diff.FailoverHost = &otherString
+	matrix = append(matrix, struct {
+		Name string
+		a    *scwlb.Backend
+		b    *scwlb.Backend
+		want bool
+	}{"with a different FailoverHost", reference, diff, false})
 
 	httpRef := deepCloneBackend(reference)
 	httpRef.HealthCheck.TCPConfig = nil
@@ -1111,7 +1146,35 @@ func TestInt32PtrEqual(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := int32PtrEqual(tt.a, tt.b)
 			if got != tt.want {
-				t.Errorf("want: %v, got: %v", got, tt.want)
+				t.Errorf("want: %v, got: %v", tt.want, got)
+			}
+		})
+	}
+}
+func TestStrPtrEqual(t *testing.T) {
+	var str1 string = "test"
+	var otherStr1 string = "test"
+	var str2 string = "test2"
+
+	matrix := []struct {
+		name string
+		a    *string
+		b    *string
+		want bool
+	}{
+		{"same", &str1, &str1, true},
+		{"same with different ptr", &str1, &otherStr1, true},
+		{"with first nil", &str1, nil, false},
+		{"with last nil", nil, &str1, false},
+		{"with both nil", nil, nil, true},
+		{"with different values", &str1, &str2, false},
+	}
+
+	for _, tt := range matrix {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ptrStringEqual(tt.a, tt.b)
+			if got != tt.want {
+				t.Errorf("want: %v, got: %v", tt.want, got)
 			}
 		})
 	}
