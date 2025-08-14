@@ -111,6 +111,18 @@ The possible values are `false`, `true` or `*` for all ports or a comma delimite
 ### `service.beta.kubernetes.io/scw-loadbalancer-type`
 This is the annotation to set the load balancer offer type.
 
+### `service.beta.kubernetes.io/scw-loadbalancer-connection-rate-limit`
+This is the annotation to set the incoming connection rate limit per second.
+Set to 0 to disable the rate limit.
+
+### `service.beta.kubernetes.io/scw-loadbalancer-enable-access-logs`
+This is the annotation to enable access logs for the load balancer.
+The default value is `false`. The possible values are `false` or `true`.
+
+### `service.beta.kubernetes.io/scw-loadbalancer-enable-http3`
+This is the annotation to enable HTTP/3 protocol for the load balancer.
+The default value is `false`. The possible values are `false` or `true`.
+
 ### `service.beta.kubernetes.io/scw-loadbalancer-timeout-client`
 This is the annotation to set the maximum client connection inactivity time.
 The default value is `10m`. The duration are go's time.Duration (ex: `1s`, `2m`, `4h`, ...).
@@ -126,6 +138,10 @@ The default value is `10m`. The duration are go's time.Duration (ex: `1s`, `2m`,
 ### `service.beta.kubernetes.io/scw-loadbalancer-timeout-tunnel`
 This is the annotation to set the maximum tunnel inactivity time.
 The default value is `10m`. The duration are go's time.Duration (ex: `1s`, `2m`, `4h`, ...).
+
+### `service.beta.kubernetes.io/scw-loadbalancer-timeout-queue`
+This is the annotation to set the maximum time for a request to be left pending in queue when max_connections is reached.
+The duration are go's time.Duration (ex: `1s`, `2m`, `4h`, ...).
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-on-marked-down-action`
 This is the annotation that modifes what occurs when a backend server is marked down.
@@ -167,9 +183,15 @@ Expected format: `"Key1=Val1,Key2=Val2"`
 This is the annotation to activate redispatch on another backend server in case of failure
 The default value is 0, which disable the redispatch. Only a value of 0 or 1 are allowed.
 
+### `service.beta.kubernetes.io/scw-loadbalancer-max-connections`
+This is the annotation to configure the number of connections.
+
 ### `service.beta.kubernetes.io/scw-loadbalancer-max-retries`
 This is the annotation to configure the number of retry on connection failure
-The default value is 2.
+The default value is 3.
+
+### `service.beta.kubernetes.io/scw-loadbalancer-failover-host`
+This is the annotation to specify the Scaleway Object Storage bucket website to be served as failover if all backend servers are down, e.g. failover-website.s3-website.fr-par.scw.cloud.
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-private`
 This is the annotation to configure the LB to be private or public
