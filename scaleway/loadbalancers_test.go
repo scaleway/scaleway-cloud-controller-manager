@@ -735,7 +735,7 @@ func TestFrontendEquals(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := frontendEquals(tt.a, tt.b)
 			if got != tt.want {
-				t.Errorf("want: %v, got: %v", got, tt.want)
+				t.Errorf("want: %v, got: %v", tt.want, got)
 			}
 		})
 	}
@@ -777,6 +777,8 @@ func TestBackendEquals(t *testing.T) {
 		},
 		Pool:                   []string{"1.2.3.4", "2.3.4.5"},
 		SendProxyV2:            &boolTrue,
+		SslBridging:            &boolFalse,
+		IgnoreSslServerVerify:  &boolFalse,
 		TimeoutServer:          &defaultTimeoutServer,
 		TimeoutConnect:         &defaultTimeoutConnect,
 		TimeoutTunnel:          &defaultTimeoutTunnel,
@@ -966,13 +968,13 @@ func TestBackendEquals(t *testing.T) {
 		a    *scwlb.Backend
 		b    *scwlb.Backend
 		want bool
-	}{"with same HTTP healthchecks", httpRef, httpDiff, false})
+	}{"with different HTTP healthchecks", httpRef, httpDiff, false})
 
 	for _, tt := range matrix {
 		t.Run(tt.Name, func(t *testing.T) {
 			got := backendEquals(tt.a, tt.b)
 			if got != tt.want {
-				t.Errorf("want: %v, got: %v", got, tt.want)
+				t.Errorf("want: %v, got: %v", tt.want, got)
 			}
 		})
 	}
@@ -999,7 +1001,7 @@ func TestStringArrayEqual(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := stringArrayEqual(tt.a, tt.b)
 			if got != tt.want {
-				t.Errorf("want: %v, got: %v", got, tt.want)
+				t.Errorf("want: %v, got: %v", tt.want, got)
 			}
 		})
 	}
@@ -1025,7 +1027,7 @@ func TestStringPtrArrayEqual(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := stringPtrArrayEqual(tt.a, tt.b)
 			if got != tt.want {
-				t.Errorf("want: %v, got: %v", got, tt.want)
+				t.Errorf("want: %v, got: %v", tt.want, got)
 			}
 		})
 	}
@@ -1053,7 +1055,7 @@ func TestDurationPtrEqual(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := durationPtrEqual(tt.a, tt.b)
 			if got != tt.want {
-				t.Errorf("want: %v, got: %v", got, tt.want)
+				t.Errorf("want: %v, got: %v", tt.want, got)
 			}
 		})
 	}
@@ -1081,7 +1083,7 @@ func TestScwDurationPtrEqual(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := scwDurationPtrEqual(tt.a, tt.b)
 			if got != tt.want {
-				t.Errorf("want: %v, got: %v", got, tt.want)
+				t.Errorf("want: %v, got: %v", tt.want, got)
 			}
 		})
 	}
@@ -1138,7 +1140,7 @@ func TestChunkArray(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := chunkArray(tt.array, 3)
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("want: %v, got: %v", got, tt.want)
+				t.Errorf("want: %v, got: %v", tt.want, got)
 			}
 		})
 	}
@@ -1158,7 +1160,7 @@ func TestMakeACLPrefix(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := makeACLPrefix(tt.frontend)
 			if got != tt.want {
-				t.Errorf("want: %v, got: %v", got, tt.want)
+				t.Errorf("want: %v, got: %v", tt.want, got)
 			}
 		})
 	}
