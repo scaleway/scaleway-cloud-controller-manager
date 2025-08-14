@@ -512,6 +512,63 @@ func TestServicePortToFrontend(t *testing.T) {
 			false,
 		},
 		{
+			"with connection rate limit",
+			&v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					UID: "uid",
+					Annotations: map[string]string{
+						"service.beta.kubernetes.io/scw-loadbalancer-connection-rate-limit": "100",
+					},
+				},
+			},
+			&scwlb.Frontend{
+				Name:                "uid_tcp_1234",
+				InboundPort:         1234,
+				TimeoutClient:       &defaultTimeout,
+				CertificateIDs:      []string{},
+				ConnectionRateLimit: func() *uint32 { v := uint32(100); return &v }(),
+			},
+			false,
+		},
+		{
+			"with enable access logs",
+			&v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					UID: "uid",
+					Annotations: map[string]string{
+						"service.beta.kubernetes.io/scw-loadbalancer-enable-access-logs": "true",
+					},
+				},
+			},
+			&scwlb.Frontend{
+				Name:             "uid_tcp_1234",
+				InboundPort:      1234,
+				TimeoutClient:    &defaultTimeout,
+				CertificateIDs:   []string{},
+				EnableAccessLogs: true,
+			},
+			false,
+		},
+		{
+			"with enable http3",
+			&v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					UID: "uid",
+					Annotations: map[string]string{
+						"service.beta.kubernetes.io/scw-loadbalancer-enable-http3": "true",
+					},
+				},
+			},
+			&scwlb.Frontend{
+				Name:           "uid_tcp_1234",
+				InboundPort:    1234,
+				TimeoutClient:  &defaultTimeout,
+				CertificateIDs: []string{},
+				EnableHTTP3:    true,
+			},
+			false,
+		},
+		{
 			"with invalid timeout",
 			&v1.Service{
 				ObjectMeta: metav1.ObjectMeta{
@@ -531,6 +588,45 @@ func TestServicePortToFrontend(t *testing.T) {
 					UID: "uid",
 					Annotations: map[string]string{
 						"service.beta.kubernetes.io/scw-loadbalancer-certificate-ids": "uid-1:uid-2",
+					},
+				},
+			},
+			nil,
+			true,
+		},
+		{
+			"with invalid connection rate limit",
+			&v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					UID: "uid",
+					Annotations: map[string]string{
+						"service.beta.kubernetes.io/scw-loadbalancer-connection-rate-limit": "not-a-number",
+					},
+				},
+			},
+			nil,
+			true,
+		},
+		{
+			"with invalid enable access logs",
+			&v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					UID: "uid",
+					Annotations: map[string]string{
+						"service.beta.kubernetes.io/scw-loadbalancer-enable-access-logs": "not-a-bool",
+					},
+				},
+			},
+			nil,
+			true,
+		},
+		{
+			"with invalid enable http3",
+			&v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					UID: "uid",
+					Annotations: map[string]string{
+						"service.beta.kubernetes.io/scw-loadbalancer-enable-http3": "invalid-bool",
 					},
 				},
 			},
@@ -726,6 +822,158 @@ func TestFrontendEquals(t *testing.T) {
 				InboundPort:    1234,
 				TimeoutClient:  &otherTimeout,
 				CertificateIDs: []string{"uid-1"},
+			},
+			false,
+		},
+		{
+			"with same connection rate limit",
+			&scwlb.Frontend{
+				Name:                "uid_tcp_1234",
+				InboundPort:         1234,
+				TimeoutClient:       &defaultTimeout,
+				CertificateIDs:      []string{},
+				ConnectionRateLimit: func() *uint32 { v := uint32(100); return &v }(),
+			},
+			&scwlb.Frontend{
+				ID:                  "uid-1",
+				Name:                "uid_tcp_1234",
+				InboundPort:         1234,
+				TimeoutClient:       &defaultTimeout,
+				CertificateIDs:      []string{},
+				ConnectionRateLimit: func() *uint32 { v := uint32(100); return &v }(),
+			},
+			true,
+		},
+		{
+			"with different connection rate limit",
+			&scwlb.Frontend{
+				Name:                "uid_tcp_1234",
+				InboundPort:         1234,
+				TimeoutClient:       &defaultTimeout,
+				CertificateIDs:      []string{},
+				ConnectionRateLimit: func() *uint32 { v := uint32(100); return &v }(),
+			},
+			&scwlb.Frontend{
+				ID:                  "uid-1",
+				Name:                "uid_tcp_1234",
+				InboundPort:         1234,
+				TimeoutClient:       &defaultTimeout,
+				CertificateIDs:      []string{},
+				ConnectionRateLimit: func() *uint32 { v := uint32(200); return &v }(),
+			},
+			false,
+		},
+		{
+			"with nil connection rate limit",
+			&scwlb.Frontend{
+				Name:                "uid_tcp_1234",
+				InboundPort:         1234,
+				TimeoutClient:       &defaultTimeout,
+				CertificateIDs:      []string{},
+				ConnectionRateLimit: nil,
+			},
+			&scwlb.Frontend{
+				ID:                  "uid-1",
+				Name:                "uid_tcp_1234",
+				InboundPort:         1234,
+				TimeoutClient:       &defaultTimeout,
+				CertificateIDs:      []string{},
+				ConnectionRateLimit: nil,
+			},
+			true,
+		},
+		{
+			"with one nil connection rate limit",
+			&scwlb.Frontend{
+				Name:                "uid_tcp_1234",
+				InboundPort:         1234,
+				TimeoutClient:       &defaultTimeout,
+				CertificateIDs:      []string{},
+				ConnectionRateLimit: func() *uint32 { v := uint32(100); return &v }(),
+			},
+			&scwlb.Frontend{
+				ID:                  "uid-1",
+				Name:                "uid_tcp_1234",
+				InboundPort:         1234,
+				TimeoutClient:       &defaultTimeout,
+				CertificateIDs:      []string{},
+				ConnectionRateLimit: nil,
+			},
+			false,
+		},
+		{
+			"with same enable access logs",
+			&scwlb.Frontend{
+				Name:             "uid_tcp_1234",
+				InboundPort:      1234,
+				TimeoutClient:    &defaultTimeout,
+				CertificateIDs:   []string{},
+				EnableAccessLogs: true,
+			},
+			&scwlb.Frontend{
+				ID:               "uid-1",
+				Name:             "uid_tcp_1234",
+				InboundPort:      1234,
+				TimeoutClient:    &defaultTimeout,
+				CertificateIDs:   []string{},
+				EnableAccessLogs: true,
+			},
+			true,
+		},
+		{
+			"with different enable access logs",
+			&scwlb.Frontend{
+				Name:             "uid_tcp_1234",
+				InboundPort:      1234,
+				TimeoutClient:    &defaultTimeout,
+				CertificateIDs:   []string{},
+				EnableAccessLogs: true,
+			},
+			&scwlb.Frontend{
+				ID:               "uid-1",
+				Name:             "uid_tcp_1234",
+				InboundPort:      1234,
+				TimeoutClient:    &defaultTimeout,
+				CertificateIDs:   []string{},
+				EnableAccessLogs: false,
+			},
+			false,
+		},
+		{
+			"with same enable http3",
+			&scwlb.Frontend{
+				Name:           "uid_tcp_1234",
+				InboundPort:    1234,
+				TimeoutClient:  &defaultTimeout,
+				CertificateIDs: []string{},
+				EnableHTTP3:    true,
+			},
+			&scwlb.Frontend{
+				ID:             "uid-1",
+				Name:           "uid_tcp_1234",
+				InboundPort:    1234,
+				TimeoutClient:  &defaultTimeout,
+				CertificateIDs: []string{},
+				EnableHTTP3:    true,
+			},
+			true,
+		},
+		{
+			"with different enable http3",
+			&scwlb.Frontend{
+				Name:           "uid_tcp_1234",
+				InboundPort:    1234,
+				TimeoutClient:  &defaultTimeout,
+				CertificateIDs: []string{},
+				EnableHTTP3:    false,
+			},
+			&scwlb.Frontend{
+				ID:             "uid-1",
+				Name:           "uid_tcp_1234",
+				InboundPort:    1234,
+				TimeoutClient:  &defaultTimeout,
+				CertificateIDs: []string{},
+				EnableHTTP3:    true,
 			},
 			false,
 		},
@@ -1145,6 +1393,59 @@ func TestInt32PtrEqual(t *testing.T) {
 	for _, tt := range matrix {
 		t.Run(tt.name, func(t *testing.T) {
 			got := int32PtrEqual(tt.a, tt.b)
+			if got != tt.want {
+				t.Errorf("want: %v, got: %v", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestUint32PtrEqual(t *testing.T) {
+	var uint1 uint32 = 1
+	var otherUint1 uint32 = 1
+	var uint2 uint32 = 2
+
+	matrix := []struct {
+		name string
+		a    *uint32
+		b    *uint32
+		want bool
+	}{
+		{"same", &uint1, &uint1, true},
+		{"same with different ptr", &uint1, &otherUint1, true},
+		{"with first nil", &uint1, nil, false},
+		{"with last nil", nil, &uint1, false},
+		{"with both nil", nil, nil, true},
+		{"with different values", &uint1, &uint2, false},
+	}
+
+	for _, tt := range matrix {
+		t.Run(tt.name, func(t *testing.T) {
+			got := uint32PtrEqual(tt.a, tt.b)
+			if got != tt.want {
+				t.Errorf("want: %v, got: %v", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestPtrUint32ToString(t *testing.T) {
+	var uint1 uint32 = 42
+	var uint2 uint32 = 0
+
+	matrix := []struct {
+		name string
+		a    *uint32
+		want string
+	}{
+		{"with value", &uint1, "42"},
+		{"with zero", &uint2, "0"},
+		{"with nil", nil, "<nil>"},
+	}
+
+	for _, tt := range matrix {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ptrUint32ToString(tt.a)
 			if got != tt.want {
 				t.Errorf("want: %v, got: %v", tt.want, got)
 			}

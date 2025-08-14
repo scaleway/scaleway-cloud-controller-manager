@@ -108,6 +108,18 @@ const (
 	// serviceAnnotationLoadBalancerZone is the zone to create the load balancer
 	serviceAnnotationLoadBalancerZone = "service.beta.kubernetes.io/scw-loadbalancer-zone"
 
+	// serviceAnnotationLoadBalancerConnectionRateLimit is the annotation to set the incoming connection rate limit per second.
+	// Set to 0 to disable the rate limit
+	serviceAnnotationLoadBalancerConnectionRateLimit = "service.beta.kubernetes.io/scw-loadbalancer-connection-rate-limit"
+
+	// serviceAnnotationLoadBalancerEnableAccessLogs is the annotation to enable access logs for the load balancer.
+	// The default value is "false". The possible values are "false" or "true".
+	serviceAnnotationLoadBalancerEnableAccessLogs = "service.beta.kubernetes.io/scw-loadbalancer-enable-access-logs"
+
+	// serviceAnnotationLoadBalancerEnableHTTP3 is the annotation to enable HTTP/3 protocol for the load balancer.
+	// The default value is "false". The possible values are "false" or "true".
+	serviceAnnotationLoadBalancerEnableHTTP3 = "service.beta.kubernetes.io/scw-loadbalancer-enable-http3"
+
 	// serviceAnnotationLoadBalancerTimeoutClient is the maximum client connection inactivity time
 	// The default value is "10m". The duration are go's time.Duration (ex: "1s", "2m", "4h", ...)
 	serviceAnnotationLoadBalancerTimeoutClient = "service.beta.kubernetes.io/scw-loadbalancer-timeout-client"
@@ -993,4 +1005,34 @@ func getKeyValueFromAnnotation(annotation string) map[string]string {
 	}
 
 	return additionalTags
+}
+
+func getConnectionRateLimit(service *v1.Service) (*uint32, error) {
+	connectionRateLimit, ok := service.Annotations[serviceAnnotationLoadBalancerConnectionRateLimit]
+	if !ok {
+		return nil, nil
+	}
+	connectionRateLimitInt, err := strconv.Atoi(connectionRateLimit)
+	if err != nil {
+		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerConnectionRateLimit)
+		return nil, errLoadBalancerInvalidAnnotation
+	}
+	connectionRateLimitUint32 := uint32(connectionRateLimitInt)
+	return &connectionRateLimitUint32, nil
+}
+
+func getEnableAccessLogs(service *v1.Service) (bool, error) {
+	enableAccessLogs, ok := service.Annotations[serviceAnnotationLoadBalancerEnableAccessLogs]
+	if !ok {
+		return false, nil
+	}
+	return strconv.ParseBool(enableAccessLogs)
+}
+
+func getEnableHTTP3(service *v1.Service) (bool, error) {
+	enableHTTP3, ok := service.Annotations[serviceAnnotationLoadBalancerEnableHTTP3]
+	if !ok {
+		return false, nil
+	}
+	return strconv.ParseBool(enableHTTP3)
 }
