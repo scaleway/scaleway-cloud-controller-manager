@@ -1025,11 +1025,32 @@ func servicePortToFrontend(service *v1.Service, loadbalancer *scwlb.LB, port v1.
 		return nil, fmt.Errorf("error getting certificate IDs for loadbalancer %s: %v", loadbalancer.ID, err)
 	}
 
+	connectionRateLimit, err := getConnectionRateLimit(service)
+	if err != nil {
+		return nil, fmt.Errorf("error getting %s annotation for loadbalancer %s: %v",
+			serviceAnnotationLoadBalancerConnectionRateLimit, loadbalancer.ID, err)
+	}
+
+	enableAccessLogs, err := getEnableAccessLogs(service)
+	if err != nil {
+		return nil, fmt.Errorf("error getting %s annotation for loadbalancer %s: %v",
+			serviceAnnotationLoadBalancerEnableAccessLogs, loadbalancer.ID, err)
+	}
+
+	enableHTTP3, err := getEnableHTTP3(service)
+	if err != nil {
+		return nil, fmt.Errorf("error getting %s annotation for loadbalancer %s: %v",
+			serviceAnnotationLoadBalancerEnableHTTP3, loadbalancer.ID, err)
+	}
+
 	return &scwlb.Frontend{
-		Name:           fmt.Sprintf("%s_tcp_%d", string(service.UID), port.Port),
-		InboundPort:    port.Port,
-		TimeoutClient:  &timeoutClient,
-		CertificateIDs: certificateIDs,
+		Name:                fmt.Sprintf("%s_tcp_%d", string(service.UID), port.Port),
+		InboundPort:         port.Port,
+		TimeoutClient:       &timeoutClient,
+		ConnectionRateLimit: connectionRateLimit,
+		CertificateIDs:      certificateIDs,
+		EnableAccessLogs:    enableAccessLogs,
+		EnableHTTP3:         enableHTTP3,
 	}, nil
 }
 
@@ -1278,6 +1299,21 @@ func frontendEquals(got, want *scwlb.Frontend) bool {
 
 	if !stringArrayEqual(got.CertificateIDs, want.CertificateIDs) {
 		klog.V(3).Infof("frontend.CertificateIDs: %s - %s", got.CertificateIDs, want.CertificateIDs)
+		return false
+	}
+
+	if !uint32PtrEqual(got.ConnectionRateLimit, want.ConnectionRateLimit) {
+		klog.V(3).Infof("frontend.ConnectionRateLimit: %s - %s", ptrUint32ToString(got.ConnectionRateLimit), ptrUint32ToString(want.ConnectionRateLimit))
+		return false
+	}
+
+	if got.EnableAccessLogs != want.EnableAccessLogs {
+		klog.V(3).Infof("frontend.EnableAccessLogs: %t - %t", got.EnableAccessLogs, want.EnableAccessLogs)
+		return false
+	}
+
+	if got.EnableHTTP3 != want.EnableHTTP3 {
+		klog.V(3).Infof("frontend.EnableHTTP3: %t - %t", got.EnableHTTP3, want.EnableHTTP3)
 		return false
 	}
 
@@ -1609,14 +1645,16 @@ func (l *loadbalancers) updateBackend(service *v1.Service, loadbalancer *scwlb.L
 // createFrontend creates a frontend on the load balancer
 func (l *loadbalancers) createFrontend(service *v1.Service, loadbalancer *scwlb.LB, frontend *scwlb.Frontend, backend *scwlb.Backend) (*scwlb.Frontend, error) {
 	f, err := l.api.CreateFrontend(&scwlb.ZonedAPICreateFrontendRequest{
-		Zone:           loadbalancer.Zone,
-		LBID:           loadbalancer.ID,
-		Name:           frontend.Name,
-		InboundPort:    frontend.InboundPort,
-		BackendID:      backend.ID,
-		TimeoutClient:  frontend.TimeoutClient,
-		CertificateIDs: &frontend.CertificateIDs,
-		EnableHTTP3:    frontend.EnableHTTP3,
+		Zone:                loadbalancer.Zone,
+		LBID:                loadbalancer.ID,
+		Name:                frontend.Name,
+		InboundPort:         frontend.InboundPort,
+		BackendID:           backend.ID,
+		TimeoutClient:       frontend.TimeoutClient,
+		CertificateIDs:      &frontend.CertificateIDs,
+		ConnectionRateLimit: frontend.ConnectionRateLimit,
+		EnableAccessLogs:    frontend.EnableAccessLogs,
+		EnableHTTP3:         frontend.EnableHTTP3,
 	})
 
 	return f, err
@@ -1625,14 +1663,16 @@ func (l *loadbalancers) createFrontend(service *v1.Service, loadbalancer *scwlb.
 // updateFrontend updates a frontend on the load balancer
 func (l *loadbalancers) updateFrontend(service *v1.Service, loadbalancer *scwlb.LB, frontend *scwlb.Frontend, backend *scwlb.Backend) (*scwlb.Frontend, error) {
 	f, err := l.api.UpdateFrontend(&scwlb.ZonedAPIUpdateFrontendRequest{
-		Zone:           loadbalancer.Zone,
-		FrontendID:     frontend.ID,
-		Name:           frontend.Name,
-		InboundPort:    frontend.InboundPort,
-		BackendID:      backend.ID,
-		TimeoutClient:  frontend.TimeoutClient,
-		CertificateIDs: &frontend.CertificateIDs,
-		EnableHTTP3:    frontend.EnableHTTP3,
+		Zone:                loadbalancer.Zone,
+		FrontendID:          frontend.ID,
+		Name:                frontend.Name,
+		InboundPort:         frontend.InboundPort,
+		BackendID:           backend.ID,
+		TimeoutClient:       frontend.TimeoutClient,
+		CertificateIDs:      &frontend.CertificateIDs,
+		ConnectionRateLimit: frontend.ConnectionRateLimit,
+		EnableAccessLogs:    &frontend.EnableAccessLogs,
+		EnableHTTP3:         frontend.EnableHTTP3,
 	})
 
 	return f, err
@@ -1687,6 +1727,17 @@ func scwDurationPtrEqual(got, want *scw.Duration) bool {
 
 // int32PtrEqual returns true if both integers are equal
 func int32PtrEqual(got, want *int32) bool {
+	if got == nil && want == nil {
+		return true
+	}
+	if got == nil || want == nil {
+		return false
+	}
+	return *got == *want
+}
+
+// uint32PtrEqual returns true if both integers are equal
+func uint32PtrEqual(got, want *uint32) bool {
 	if got == nil && want == nil {
 		return true
 	}
@@ -1773,6 +1824,13 @@ func strip32SubnetMasks(subnets []string) []string {
 }
 
 func ptrInt32ToString(i *int32) string {
+	if i == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("%d", *i)
+}
+
+func ptrUint32ToString(i *uint32) string {
 	if i == nil {
 		return "<nil>"
 	}
