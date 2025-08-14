@@ -1080,6 +1080,11 @@ func servicePortToBackend(service *v1.Service, loadbalancer *scwlb.LB, port v1.S
 		return nil, err
 	}
 
+	timeoutQueue, err := getTimeoutQueue(service)
+	if err != nil {
+		return nil, err
+	}
+
 	onMarkedDownAction, err := getOnMarkedDownAction(service)
 	if err != nil {
 		return nil, err
@@ -1090,7 +1095,17 @@ func servicePortToBackend(service *v1.Service, loadbalancer *scwlb.LB, port v1.S
 		return nil, err
 	}
 
+	maxConnections, err := getMaxConnections(service)
+	if err != nil {
+		return nil, err
+	}
+
 	maxRetries, err := getMaxRetries(service)
+	if err != nil {
+		return nil, err
+	}
+
+	failoverHost, err := getFailoverHost(service)
 	if err != nil {
 		return nil, err
 	}
@@ -1195,10 +1210,13 @@ func servicePortToBackend(service *v1.Service, loadbalancer *scwlb.LB, port v1.S
 		TimeoutServer:          &timeoutServer,
 		TimeoutConnect:         &timeoutConnect,
 		TimeoutTunnel:          &timeoutTunnel,
+		TimeoutQueue:           timeoutQueue,
 		OnMarkedDownAction:     onMarkedDownAction,
 		HealthCheck:            healthCheck,
 		RedispatchAttemptCount: redispatchAttemptCount,
+		MaxConnections:         maxConnections,
 		MaxRetries:             maxRetries,
+		FailoverHost:           failoverHost,
 	}
 
 	if stickySessions == scwlb.StickySessionsTypeCookie {
@@ -1316,6 +1334,10 @@ func backendEquals(got, want *scwlb.Backend) bool {
 		klog.V(3).Infof("backend.TimeoutTunnel: %s - %s", got.TimeoutTunnel, want.TimeoutTunnel)
 		return false
 	}
+	if !durationPtrEqual(got.TimeoutQueue.ToTimeDuration(), want.TimeoutQueue.ToTimeDuration()) {
+		klog.V(3).Infof("backend.TimeoutQueue: %s - %s", ptrScwDurationToString(got.TimeoutQueue), ptrScwDurationToString(want.TimeoutQueue))
+		return false
+	}
 	if got.OnMarkedDownAction != want.OnMarkedDownAction {
 		klog.V(3).Infof("backend.OnMarkedDownAction: %s - %s", got.OnMarkedDownAction, want.OnMarkedDownAction)
 		return false
@@ -1324,12 +1346,21 @@ func backendEquals(got, want *scwlb.Backend) bool {
 		klog.V(3).Infof("backend.RedispatchAttemptCount: %s - %s", ptrInt32ToString(got.RedispatchAttemptCount), ptrInt32ToString(want.RedispatchAttemptCount))
 		return false
 	}
+	if !int32PtrEqual(got.MaxConnections, want.MaxConnections) {
+		klog.V(3).Infof("backend.MaxConnections: %s - %s", ptrInt32ToString(got.MaxConnections), ptrInt32ToString(want.MaxConnections))
+		return false
+	}
 	if !int32PtrEqual(got.MaxRetries, want.MaxRetries) {
 		klog.V(3).Infof("backend.MaxRetries: %s - %s", ptrInt32ToString(got.MaxRetries), ptrInt32ToString(want.MaxRetries))
 		return false
 	}
 	if got.StickySessionsCookieName != want.StickySessionsCookieName {
 		klog.V(3).Infof("backend.StickySessionsCookieName: %s - %s", got.StickySessionsCookieName, want.StickySessionsCookieName)
+		return false
+	}
+
+	if !ptrStringEqual(got.FailoverHost, want.FailoverHost) {
+		klog.V(3).Infof("backend.FailoverHost: %s - %s", ptrStringToString(got.FailoverHost), ptrStringToString(want.FailoverHost))
 		return false
 	}
 
@@ -1510,9 +1541,12 @@ func (l *loadbalancers) createBackend(service *v1.Service, loadbalancer *scwlb.L
 		TimeoutServer:            backend.TimeoutServer,
 		TimeoutConnect:           backend.TimeoutConnect,
 		TimeoutTunnel:            backend.TimeoutTunnel,
+		TimeoutQueue:             backend.TimeoutQueue,
 		OnMarkedDownAction:       backend.OnMarkedDownAction,
 		RedispatchAttemptCount:   backend.RedispatchAttemptCount,
+		MaxConnections:           backend.MaxConnections,
 		MaxRetries:               backend.MaxRetries,
+		FailoverHost:             backend.FailoverHost,
 	})
 	if err != nil {
 		return nil, err
@@ -1538,9 +1572,12 @@ func (l *loadbalancers) updateBackend(service *v1.Service, loadbalancer *scwlb.L
 		TimeoutServer:            backend.TimeoutServer,
 		TimeoutConnect:           backend.TimeoutConnect,
 		TimeoutTunnel:            backend.TimeoutTunnel,
+		TimeoutQueue:             backend.TimeoutQueue,
 		OnMarkedDownAction:       backend.OnMarkedDownAction,
 		RedispatchAttemptCount:   backend.RedispatchAttemptCount,
+		MaxConnections:           backend.MaxConnections,
 		MaxRetries:               backend.MaxRetries,
+		FailoverHost:             backend.FailoverHost,
 	})
 	if err != nil {
 		return nil, err
@@ -1606,6 +1643,17 @@ func stringArrayEqual(got, want []string) bool {
 	slices.Sort(got)
 	slices.Sort(want)
 	return reflect.DeepEqual(got, want)
+}
+
+// ptrStringEqual returns true if both strings are equal
+func ptrStringEqual(got, want *string) bool {
+	if got == nil && want == nil {
+		return true
+	}
+	if got == nil || want == nil {
+		return false
+	}
+	return *got == *want
 }
 
 // stringPtrArrayEqual returns true if both arrays contains the exact same elements regardless of the order
@@ -1798,4 +1846,18 @@ func nodesInitialized(nodes []*v1.Node) error {
 	}
 
 	return nil
+}
+
+func ptrStringToString(s *string) string {
+	if s == nil {
+		return "<nil>"
+	}
+	return *s
+}
+
+func ptrScwDurationToString(i *scw.Duration) string {
+	if i == nil {
+		return "<nil>"
+	}
+	return i.ToTimeDuration().String()
 }

@@ -124,6 +124,10 @@ const (
 	// The default value is "10m". The duration are go's time.Duration (ex: "1s", "2m", "4h", ...)
 	serviceAnnotationLoadBalancerTimeoutTunnel = "service.beta.kubernetes.io/scw-loadbalancer-timeout-tunnel"
 
+	// serviceAnnotationLoadBalancerTimeoutQueue is the maximum time for a request to be left pending in queue when max_connections is reached.
+	// The duration are go's time.Duration (ex: "1s", "2m", "4h", ...)
+	serviceAnnotationLoadBalancerTimeoutQueue = "service.beta.kubernetes.io/scw-loadbalancer-timeout-queue"
+
 	// serviceAnnotationLoadBalancerOnMarkedDownAction is the annotation that modifes what occurs when a backend server is marked down
 	// The default value is "on_marked_down_action_none" and the possible values are "on_marked_down_action_none" and "shutdown_sessions"
 	serviceAnnotationLoadBalancerOnMarkedDownAction = "service.beta.kubernetes.io/scw-loadbalancer-on-marked-down-action"
@@ -168,9 +172,15 @@ const (
 	// The default value is "0", which disable the redispatch
 	serviceAnnotationLoadBalancerRedispatchAttemptCount = "service.beta.kubernetes.io/scw-loadbalancer-redispatch-attempt-count"
 
+	// serviceAnnotationLoadBalancerMaxConnections is the annotation to configure the number of connections
+	serviceAnnotationLoadBalancerMaxConnections = "service.beta.kubernetes.io/scw-loadbalancer-max-connections"
+
 	// serviceAnnotationLoadBalancerMaxRetries is the annotation to configure the number of retry on connection failure
 	// The default value is 3.
 	serviceAnnotationLoadBalancerMaxRetries = "service.beta.kubernetes.io/scw-loadbalancer-max-retries"
+
+	// serviceAnnotationLoadBalancerFailoverHost is the annotation to specify the Scaleway Object Storage bucket website to be served as failover if all backend servers are down, e.g. failover-website.s3-website.fr-par.scw.cloud.
+	serviceAnnotationLoadBalancerFailoverHost = "service.beta.kubernetes.io/scw-loadbalancer-failover-host"
 
 	// serviceAnnotationLoadBalancerPrivate is the annotation to configure the LB to be private or public
 	// The LB will be public if unset or false.
@@ -422,6 +432,21 @@ func getTimeoutTunnel(service *v1.Service) (time.Duration, error) {
 	return timeoutTunnelDuration, nil
 }
 
+func getTimeoutQueue(service *v1.Service) (*scw.Duration, error) {
+	timeoutQueue, ok := service.Annotations[serviceAnnotationLoadBalancerTimeoutQueue]
+	if !ok {
+		return nil, nil
+	}
+
+	timeoutQueueDuration, err := time.ParseDuration(timeoutQueue)
+	if err != nil {
+		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerTimeoutQueue)
+		return nil, errLoadBalancerInvalidAnnotation
+	}
+
+	return scw.NewDurationFromTimeDuration(timeoutQueueDuration), nil
+}
+
 func getOnMarkedDownAction(service *v1.Service) (scwlb.OnMarkedDownAction, error) {
 	onMarkedDownAction, ok := service.Annotations[serviceAnnotationLoadBalancerOnMarkedDownAction]
 	if !ok {
@@ -454,6 +479,21 @@ func getRedisatchAttemptCount(service *v1.Service) (*int32, error) {
 	return &redispatchAttemptCountInt32, nil
 }
 
+func getMaxConnections(service *v1.Service) (*int32, error) {
+	maxConnectionsCount, ok := service.Annotations[serviceAnnotationLoadBalancerMaxConnections]
+	if !ok {
+		return nil, nil
+	}
+	maxConnectionsCountInt, err := strconv.Atoi(maxConnectionsCount)
+	if err != nil {
+		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerMaxConnections)
+		return nil, errLoadBalancerInvalidAnnotation
+
+	}
+	maxConnectionsCountInt32 := int32(maxConnectionsCountInt)
+	return &maxConnectionsCountInt32, nil
+}
+
 func getMaxRetries(service *v1.Service) (*int32, error) {
 	maxRetriesCount, ok := service.Annotations[serviceAnnotationLoadBalancerMaxRetries]
 	if !ok {
@@ -468,6 +508,14 @@ func getMaxRetries(service *v1.Service) (*int32, error) {
 	}
 	maxRetriesCountInt32 := int32(maxRetriesCountInt)
 	return &maxRetriesCountInt32, nil
+}
+
+func getFailoverHost(service *v1.Service) (*string, error) {
+	failoverHost, ok := service.Annotations[serviceAnnotationLoadBalancerFailoverHost]
+	if !ok {
+		return nil, nil
+	}
+	return &failoverHost, nil
 }
 
 func getHealthCheckDelay(service *v1.Service) (time.Duration, error) {
