@@ -1221,7 +1221,7 @@ func servicePortToBackend(service *v1.Service, loadbalancer *scwlb.LB, port v1.S
 		Name:                   fmt.Sprintf("%s_tcp_%d", string(service.UID), port.NodePort),
 		Pool:                   nodeIPs,
 		ForwardProtocol:        protocol,
-		SslBridging:            sslBridging,
+		SslBridging:            &sslBridging,
 		IgnoreSslServerVerify:  sslSkipVerify,
 		ForwardPort:            port.NodePort,
 		ForwardPortAlgorithm:   forwardPortAlgorithm,

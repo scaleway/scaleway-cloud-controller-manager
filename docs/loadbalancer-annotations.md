@@ -162,7 +162,7 @@ NB: forwarding HTTPS traffic with HTTP protocol enabled will work only if using 
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-http-backend-tls`
 This is the annotation to enable tls towards the backend when using http forward protocol
-The possible values are `false`, `true` or `*` for all ports or a comma delimited list of the service port (for instance `80,443`)
+Default to `false`. The possible values are `false`, `true` or `*` for all ports or a comma delimited list of the service port (for instance `80,443`)
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-http-backend-tls-skip-verify`
 This is the annotation to skip tls verification on backends when using http forward protocol with TLS enabled

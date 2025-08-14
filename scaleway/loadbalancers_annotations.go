@@ -157,8 +157,8 @@ const (
 	// (for instance "80,443")
 	serviceAnnotationLoadBalancerProtocolHTTP = "service.beta.kubernetes.io/scw-loadbalancer-protocol-http"
 
-	// serviceAnnotationLoadBalancerHTTPBackendTLS is the annotation to enable tls towards the backend when using http forward protocol
-	// The possible values are "false", "true" or "*" for all ports or a comma delimited list of the service port
+	// serviceAnnotationLoadBalancerHTTPBackendTLS is the annotation to enable tls towards the backend when using http forward protocol.
+	// Default to "false". The possible values are "false", "true" or "*" for all ports or a comma delimited list of the service port
 	// (for instance "80,443")
 	serviceAnnotationLoadBalancerHTTPBackendTLS = "service.beta.kubernetes.io/scw-loadbalancer-http-backend-tls"
 
@@ -659,10 +659,10 @@ func getForwardProtocol(service *v1.Service, nodePort int32) (scwlb.Protocol, er
 	return scwlb.ProtocolTCP, nil
 }
 
-func getSSLBridging(service *v1.Service, nodePort int32) (*bool, error) {
+func getSSLBridging(service *v1.Service, nodePort int32) (bool, error) {
 	tlsEnabled, found := service.Annotations[serviceAnnotationLoadBalancerHTTPBackendTLS]
 	if !found {
-		return nil, nil
+		return false, nil
 	}
 
 	var svcPort int32 = -1
@@ -673,16 +673,16 @@ func getSSLBridging(service *v1.Service, nodePort int32) (*bool, error) {
 	}
 	if svcPort == -1 {
 		klog.Errorf("no valid port found")
-		return nil, errLoadBalancerInvalidAnnotation
+		return false, errLoadBalancerInvalidAnnotation
 	}
 
 	isTLSEnabled, err := isPortInRange(tlsEnabled, svcPort)
 	if err != nil {
 		klog.Errorf("unable to check if port %d is in range %s", svcPort, tlsEnabled)
-		return nil, err
+		return false, err
 	}
 
-	return scw.BoolPtr(isTLSEnabled), nil
+	return isTLSEnabled, nil
 }
 
 func getSSLBridgingSkipVerify(service *v1.Service, nodePort int32) (*bool, error) {
