@@ -844,7 +844,6 @@ func (l *loadbalancers) createPrivateServiceStatus(service *v1.Service, lb *scwl
 		status.Ingress = []v1.LoadBalancerIngress{
 			{
 				Hostname: fmt.Sprintf("%s.%s", lb.ID, pn.Name),
-				IPMode:   ipMode,
 			},
 		}
 	} else {
@@ -879,7 +878,7 @@ func (l *loadbalancers) createPublicServiceStatus(service *v1.Service, lb *scwlb
 	status.Ingress = make([]v1.LoadBalancerIngress, 0)
 	for _, ip := range lb.IP {
 		if getUseHostname(service) {
-			status.Ingress = append(status.Ingress, v1.LoadBalancerIngress{Hostname: ip.Reverse, IPMode: ipMode})
+			status.Ingress = append(status.Ingress, v1.LoadBalancerIngress{Hostname: ip.Reverse})
 		} else {
 			status.Ingress = append(status.Ingress, v1.LoadBalancerIngress{IP: ip.IPAddress, IPMode: ipMode})
 		}
