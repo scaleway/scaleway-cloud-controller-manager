@@ -584,11 +584,11 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 		return fmt.Errorf("invalid value for annotation %s: expected boolean", serviceAnnotationLoadBalancerExternallyManaged)
 	}
 
+	nodes = filterNodes(service, nodes)
 	if err := nodesInitialized(nodes); err != nil {
 		return err
 	}
 
-	nodes = filterNodes(service, nodes)
 	if l.pnID != "" {
 		respPN, err := l.api.ListLBPrivateNetworks(&scwlb.ZonedAPIListLBPrivateNetworksRequest{
 			Zone: loadbalancer.Zone,
