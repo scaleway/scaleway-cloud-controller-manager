@@ -589,48 +589,8 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 		return err
 	}
 
-	if l.pnID != "" {
-		respPN, err := l.api.ListLBPrivateNetworks(&scwlb.ZonedAPIListLBPrivateNetworksRequest{
-			Zone: loadbalancer.Zone,
-			LBID: loadbalancer.ID,
-		})
-		if err != nil {
-			return fmt.Errorf("error listing private networks of load balancer %s: %v", loadbalancer.ID, err)
-		}
-
-		var pnNIC *scwlb.PrivateNetwork
-		for _, pNIC := range respPN.PrivateNetwork {
-			if pNIC.PrivateNetworkID == l.pnID {
-				pnNIC = pNIC
-				continue
-			}
-
-			// this PN should not be attached to this loadbalancer
-			if !lbExternallyManaged {
-				klog.V(3).Infof("detach extra private network %s from load balancer %s", pNIC.PrivateNetworkID, loadbalancer.ID)
-				err = l.api.DetachPrivateNetwork(&scwlb.ZonedAPIDetachPrivateNetworkRequest{
-					Zone:             loadbalancer.Zone,
-					LBID:             loadbalancer.ID,
-					PrivateNetworkID: pNIC.PrivateNetworkID,
-				})
-				if err != nil {
-					return fmt.Errorf("unable to detach unmatched private network %s from %s: %v", pNIC.PrivateNetworkID, loadbalancer.ID, err)
-				}
-			}
-		}
-
-		if pnNIC == nil {
-			klog.V(3).Infof("attach private network %s to load balancer %s", l.pnID, loadbalancer.ID)
-			_, err = l.api.AttachPrivateNetwork(&scwlb.ZonedAPIAttachPrivateNetworkRequest{
-				Zone:             loadbalancer.Zone,
-				LBID:             loadbalancer.ID,
-				PrivateNetworkID: l.pnID,
-				DHCPConfig:       &scwlb.PrivateNetworkDHCPConfig{},
-			})
-			if err != nil {
-				return fmt.Errorf("unable to attach private network %s on %s: %v", l.pnID, loadbalancer.ID, err)
-			}
-		}
+	if err := l.attachPrivateNetworks(loadbalancer, service, lbExternallyManaged); err != nil {
+		return fmt.Errorf("failed to attach private networks: %w", err)
 	}
 
 	var targetIPs []string
@@ -813,6 +773,74 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 				klog.Errorf("error updating load balancer %s: %v", loadbalancer.ID, err)
 				return fmt.Errorf("error updating load balancer %s: %v", loadbalancer.ID, err)
 			}
+		}
+	}
+
+	return nil
+}
+
+func (l *loadbalancers) attachPrivateNetworks(loadbalancer *scwlb.LB, service *v1.Service, lbExternallyManaged bool) error {
+	if l.pnID == "" {
+		return nil
+	}
+
+	// maps pnID => attached
+	pnIDs := make(map[string]bool)
+
+	// Fetch user-specified PrivateNetworkIDs unless LB is externally managed.
+	if !lbExternallyManaged {
+		for _, pnID := range getPrivateNetworkIDs(service) {
+			pnIDs[pnID] = false
+		}
+	}
+
+	if len(pnIDs) == 0 {
+		pnIDs[l.pnID] = false
+	}
+
+	respPN, err := l.api.ListLBPrivateNetworks(&scwlb.ZonedAPIListLBPrivateNetworksRequest{
+		Zone: loadbalancer.Zone,
+		LBID: loadbalancer.ID,
+	})
+	if err != nil {
+		return fmt.Errorf("error listing private networks of load balancer %s: %v", loadbalancer.ID, err)
+	}
+
+	for _, pNIC := range respPN.PrivateNetwork {
+		if _, ok := pnIDs[pNIC.PrivateNetworkID]; ok {
+			// Mark this Private Network as attached.
+			pnIDs[pNIC.PrivateNetworkID] = true
+			continue
+		}
+
+		// this PN should not be attached to this loadbalancer
+		if !lbExternallyManaged {
+			klog.V(3).Infof("detach extra private network %s from load balancer %s", pNIC.PrivateNetworkID, loadbalancer.ID)
+			err = l.api.DetachPrivateNetwork(&scwlb.ZonedAPIDetachPrivateNetworkRequest{
+				Zone:             loadbalancer.Zone,
+				LBID:             loadbalancer.ID,
+				PrivateNetworkID: pNIC.PrivateNetworkID,
+			})
+			if err != nil {
+				return fmt.Errorf("unable to detach unmatched private network %s from %s: %v", pNIC.PrivateNetworkID, loadbalancer.ID, err)
+			}
+		}
+	}
+
+	for pnID, attached := range pnIDs {
+		if attached {
+			continue
+		}
+
+		klog.V(3).Infof("attach private network %s to load balancer %s", pnID, loadbalancer.ID)
+		_, err = l.api.AttachPrivateNetwork(&scwlb.ZonedAPIAttachPrivateNetworkRequest{
+			Zone:             loadbalancer.Zone,
+			LBID:             loadbalancer.ID,
+			PrivateNetworkID: pnID,
+			DHCPConfig:       &scwlb.PrivateNetworkDHCPConfig{},
+		})
+		if err != nil {
+			return fmt.Errorf("unable to attach private network %s on %s: %v", pnID, loadbalancer.ID, err)
 		}
 	}
 
