@@ -224,6 +224,18 @@ const (
 	// When proxy-protocol is enabled on ALL the ports of the service, the ipMode
 	// is automatically set to "Proxy". You can use this annotation to override this.
 	serviceAnnotationLoadBalancerIPMode = "service.beta.kubernetes.io/scw-loadbalancer-ip-mode"
+
+	// serviceAnnotationPrivateNetworkIDs is the annotation to configure the Private Networks
+	// that will be attached to the load balancer. It is possible to provide a single
+	// Private Network ID, or a comma delimited list of Private Network IDs.
+	// If this annotation is not set or empty, the load balancer will be attached
+	// to the Private Network specified in the `PN_ID` environment variable.
+	// This annotation is ignored when service.beta.kubernetes.io/scw-loadbalancer-externally-managed is enabled.
+	//
+	// The possible formats are:
+	//	- "<pn-id>": will attach a single Private Network to the LB.
+	//	- "<pn-id>,<pn-id>": will attach the two Private Networks to the LB.
+	serviceAnnotationPrivateNetworkIDs = "service.beta.kubernetes.io/scw-loadbalancer-pn-ids"
 )
 
 func getLoadBalancerID(service *v1.Service) (scw.Zone, string, error) {
@@ -293,6 +305,15 @@ func getIPIDs(service *v1.Service) []string {
 	}
 
 	return strings.Split(ipIDs, ",")
+}
+
+func getPrivateNetworkIDs(service *v1.Service) []string {
+	pnIDs := service.Annotations[serviceAnnotationPrivateNetworkIDs]
+	if pnIDs == "" {
+		return nil
+	}
+
+	return strings.Split(pnIDs, ",")
 }
 
 func getSendProxyV2(service *v1.Service, nodePort int32) (scwlb.ProxyProtocol, error) {
