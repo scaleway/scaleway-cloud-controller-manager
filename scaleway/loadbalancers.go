@@ -1240,6 +1240,18 @@ func servicePortToBackend(service *v1.Service, loadbalancer *scwlb.LB, port v1.S
 			return nil, err
 		}
 		healthCheck.HTTPSConfig = hc
+	case "kubeproxy":
+		if service.Spec.ExternalTrafficPolicy == api.ServiceExternalTrafficPolicyLocal {
+			healthCheck.Port = service.Spec.HealthCheckNodePort
+		} else {
+			klog.Errorf("wrong value for healthCheckType")
+			return nil, errLoadBalancerInvalidAnnotation
+		}
+		healthCheck.HTTPSConfig = &scwlb.HealthCheckHTTPConfig{
+			Method:     "GET",
+			Code:       scw.Int32Ptr(200),
+			URI:        "/",
+		}
 	default:
 		klog.Errorf("wrong value for healthCheckType")
 		return nil, errLoadBalancerInvalidAnnotation
