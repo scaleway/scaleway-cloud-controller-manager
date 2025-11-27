@@ -283,6 +283,178 @@ func TestGetValueForPort(t *testing.T) {
 	}
 }
 
+func TestGetHealthCheckPort(t *testing.T) {
+	testCases := []struct {
+		name       string
+		svc        *v1.Service
+		nodePort   int32
+		result     int32
+		errMessage string
+	}{
+		{
+			name: "no annotation, returns nodePort",
+			svc: &v1.Service{
+				Spec: v1.ServiceSpec{
+					Ports: []v1.ServicePort{
+						{
+							NodePort: 30080,
+							Port:     80,
+						},
+					},
+				},
+			},
+			nodePort:   30080,
+			result:     30080,
+			errMessage: "",
+		},
+		{
+			name: "minimum valid port",
+			svc: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"service.beta.kubernetes.io/scw-loadbalancer-health-check-port": "1",
+					},
+				},
+				Spec: v1.ServiceSpec{
+					Ports: []v1.ServicePort{
+						{
+							NodePort: 30080,
+							Port:     80,
+						},
+					},
+				},
+			},
+			nodePort:   30080,
+			result:     1,
+			errMessage: "",
+		},
+		{
+			name: "maximum valid port",
+			svc: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"service.beta.kubernetes.io/scw-loadbalancer-health-check-port": "65535",
+					},
+				},
+				Spec: v1.ServiceSpec{
+					Ports: []v1.ServicePort{
+						{
+							NodePort: 30080,
+							Port:     80,
+						},
+					},
+				},
+			},
+			nodePort:   30080,
+			result:     65535,
+			errMessage: "",
+		},
+		// Error cases
+		{
+			name: "port too low (0)",
+			svc: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"service.beta.kubernetes.io/scw-loadbalancer-health-check-port": "0",
+					},
+				},
+				Spec: v1.ServiceSpec{
+					Ports: []v1.ServicePort{
+						{
+							NodePort: 30080,
+							Port:     80,
+						},
+					},
+				},
+			},
+			nodePort:   30080,
+			result:     0,
+			errMessage: "load balancer invalid annotation",
+		},
+		{
+			name: "port too high (65536)",
+			svc: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"service.beta.kubernetes.io/scw-loadbalancer-health-check-port": "65536",
+					},
+				},
+				Spec: v1.ServiceSpec{
+					Ports: []v1.ServicePort{
+						{
+							NodePort: 30080,
+							Port:     80,
+						},
+					},
+				},
+			},
+			nodePort:   30080,
+			result:     0,
+			errMessage: "load balancer invalid annotation",
+		},
+		{
+			name: "negative port",
+			svc: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"service.beta.kubernetes.io/scw-loadbalancer-health-check-port": "-1",
+					},
+				},
+				Spec: v1.ServiceSpec{
+					Ports: []v1.ServicePort{
+						{
+							NodePort: 30080,
+							Port:     80,
+						},
+					},
+				},
+			},
+			nodePort:   30080,
+			result:     0,
+			errMessage: "load balancer invalid annotation",
+		},
+		{
+			name: "non-numeric value",
+			svc: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"service.beta.kubernetes.io/scw-loadbalancer-health-check-port": "not-a-number",
+					},
+				},
+				Spec: v1.ServiceSpec{
+					Ports: []v1.ServicePort{
+						{
+							NodePort: 30080,
+							Port:     80,
+						},
+					},
+				},
+			},
+			nodePort:   30080,
+			result:     0,
+			errMessage: "load balancer invalid annotation",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := getHealthCheckPort(tc.svc, tc.nodePort)
+			if result != tc.result {
+				t.Errorf("getHealthCheckPort: got %d, expected %d", result, tc.result)
+			}
+			if err == nil && tc.errMessage != "" {
+				t.Errorf("getHealthCheckPort: expected error %q, got nil", tc.errMessage)
+			}
+			if err != nil && tc.errMessage == "" {
+				t.Errorf("getHealthCheckPort: unexpected error %v", err)
+			}
+			if err != nil && tc.errMessage != "" && err.Error() != tc.errMessage {
+				t.Errorf("getHealthCheckPort: got error %q, expected %q", err.Error(), tc.errMessage)
+			}
+		})
+	}
+}
+
 func TestFilterNodes(t *testing.T) {
 	service := &v1.Service{
 		ObjectMeta: metav1.ObjectMeta{

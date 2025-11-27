@@ -1158,9 +1158,13 @@ func servicePortToBackend(service *v1.Service, loadbalancer *scwlb.LB, port v1.S
 		return nil, err
 	}
 
-	healthCheck := &scwlb.HealthCheck{
-		Port: port.NodePort,
+	healthCheck := &scwlb.HealthCheck{}
+
+	healthCheckPort, err := getHealthCheckPort(service, port.NodePort)
+	if err != nil {
+		return nil, err
 	}
+	healthCheck.Port = healthCheckPort
 
 	healthCheckDelay, err := getHealthCheckDelay(service)
 	if err != nil {
@@ -1649,7 +1653,7 @@ func (l *loadbalancers) updateBackend(service *v1.Service, loadbalancer *scwlb.L
 	if _, err := l.api.UpdateHealthCheck(&scwlb.ZonedAPIUpdateHealthCheckRequest{
 		Zone:                loadbalancer.Zone,
 		BackendID:           backend.ID,
-		Port:                backend.ForwardPort,
+		Port:                backend.HealthCheck.Port,
 		CheckDelay:          backend.HealthCheck.CheckDelay,
 		CheckTimeout:        backend.HealthCheck.CheckTimeout,
 		CheckMaxRetries:     backend.HealthCheck.CheckMaxRetries,

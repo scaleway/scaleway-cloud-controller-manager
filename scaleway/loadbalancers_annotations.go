@@ -86,6 +86,12 @@ const (
 	// NB: Required when setting service.beta.kubernetes.io/scw-loadbalancer-health-check-type to "pgsql"
 	serviceAnnotationLoadBalancerHealthCheckPgsqlUser = "service.beta.kubernetes.io/scw-loadbalancer-health-check-pgsql-user"
 
+	// serviceAnnotationLoadBalancerHealthCheckPort is the annotation to explicitly define the port used for health checks
+	// It is possible to set a single port for all backends like "18080" or per port like "80:10080;443:10443"
+	// The port must be a valid TCP/UDP port (1-65535)
+	// If not set, the service port is used as the health check port
+	serviceAnnotationLoadBalancerHealthCheckPort = "service.beta.kubernetes.io/scw-loadbalancer-health-check-port"
+
 	// serviceAnnotationLoadBalancerSendProxyV2 is the annotation that enables PROXY protocol version 2 (must be supported by backend servers)
 	// The default value is "false" and the possible values are "false" or "true"
 	// or a comma delimited list of the service port on which to apply the proxy protocol (for instance "80,443")
@@ -627,6 +633,38 @@ func getHealthCheckTransientCheckDelay(service *v1.Service) (*scw.Duration, erro
 		Seconds: durationpb.Seconds,
 		Nanos:   durationpb.Nanos,
 	}, nil
+}
+
+// getHealthCheckPort returns the port to use for health checks.
+// It supports per-port configuration with the format "80:10080;443:10443" or a single port like "18080".
+// If the annotation is not set, it returns the provided nodePort as default.
+func getHealthCheckPort(service *v1.Service, nodePort int32) (int32, error) {
+	annotation, ok := service.Annotations[serviceAnnotationLoadBalancerHealthCheckPort]
+	if !ok {
+		return nodePort, nil
+	}
+
+	portStr, err := getValueForPort(service, nodePort, annotation)
+	if err != nil {
+		klog.Errorf("could not get value for annotation %s and port %d", serviceAnnotationLoadBalancerHealthCheckPort, nodePort)
+		return 0, err
+	}
+
+	if portStr == "" {
+		return nodePort, nil
+	}
+
+	port, err := strconv.ParseInt(portStr, 10, 32)
+	if err != nil {
+		klog.Errorf("invalid value for annotation %s: %s is not a valid port number", serviceAnnotationLoadBalancerHealthCheckPort, portStr)
+		return 0, errLoadBalancerInvalidAnnotation
+	}
+	if port < 1 || port > 65535 {
+		klog.Errorf("invalid value for annotation %s: port %d is out of range (1-65535)", serviceAnnotationLoadBalancerHealthCheckPort, port)
+		return 0, errLoadBalancerInvalidAnnotation
+	}
+
+	return int32(port), nil
 }
 
 func getForceInternalIP(service *v1.Service) bool {

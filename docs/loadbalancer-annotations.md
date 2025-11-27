@@ -69,6 +69,12 @@ The default value is `5s`. The duration are go's time.Duration (ex: `1s`, `2m`, 
 This is the annotation to set the number of consecutive unsuccessful health checks, after wich the server will be considered dead.
 The default value is `5`.
 
+### `service.beta.kubernetes.io/scw-loadbalancer-health-check-port`
+This is the annotation to explicitly define the port used for health checks.
+It is possible to set a single port for all backends like `18080` or per port like `80:10080;443:10443`.
+The port must be a valid TCP/UDP port (1-65535).
+If not set, the service port is used as the health check port.
+
 ### `service.beta.kubernetes.io/scw-loadbalancer-health-check-http-uri`
 This is the annotation to set the URI that is used by the `http` health check.
 It is possible to set the uri per port, like `80:/;443,8443:mydomain.tld/healthz`.
