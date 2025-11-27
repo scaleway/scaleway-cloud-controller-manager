@@ -1250,7 +1250,7 @@ func servicePortToBackend(service *v1.Service, loadbalancer *scwlb.LB, port v1.S
 		healthCheck.HTTPSConfig = &scwlb.HealthCheckHTTPConfig{
 			Method:     "GET",
 			Code:       scw.Int32Ptr(200),
-			URI:        "/",
+			URI:        "/healthz",
 		}
 	default:
 		klog.Errorf("wrong value for healthCheckType")
