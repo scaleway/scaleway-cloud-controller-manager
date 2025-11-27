@@ -72,8 +72,11 @@ The default value is `5`.
 ### `service.beta.kubernetes.io/scw-loadbalancer-health-check-port`
 This is the annotation to explicitly define the port used for health checks.
 It is possible to set a single port for all backends like `18080` or per port like `80:10080;443:10443`.
-The port must be a valid TCP/UDP port (1-65535).
+The special value `auto` will use the service's `spec.healthCheckNodePort` when `externalTrafficPolicy` is `Local`.
+The port must be a valid TCP/UDP port (1-65535) or `auto`.
 If not set, the service port is used as the health check port.
+
+> **Note**: In a future major release, `auto` will become the default behavior when not explicitly set.
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-health-check-http-uri`
 This is the annotation to set the URI that is used by the `http` health check.

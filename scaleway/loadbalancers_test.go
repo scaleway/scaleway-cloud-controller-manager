@@ -434,6 +434,98 @@ func TestGetHealthCheckPort(t *testing.T) {
 			result:     0,
 			errMessage: "load balancer invalid annotation",
 		},
+		// Auto value tests
+		{
+			name: "auto with externalTrafficPolicy Local and healthCheckNodePort set",
+			svc: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"service.beta.kubernetes.io/scw-loadbalancer-health-check-port": "auto",
+					},
+				},
+				Spec: v1.ServiceSpec{
+					ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeLocal,
+					HealthCheckNodePort:   32000,
+					Ports: []v1.ServicePort{
+						{
+							NodePort: 30080,
+							Port:     80,
+						},
+					},
+				},
+			},
+			nodePort:   30080,
+			result:     32000,
+			errMessage: "",
+		},
+		{
+			name: "AUTO (uppercase) with externalTrafficPolicy Local and healthCheckNodePort set",
+			svc: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"service.beta.kubernetes.io/scw-loadbalancer-health-check-port": "AUTO",
+					},
+				},
+				Spec: v1.ServiceSpec{
+					ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeLocal,
+					HealthCheckNodePort:   32000,
+					Ports: []v1.ServicePort{
+						{
+							NodePort: 30080,
+							Port:     80,
+						},
+					},
+				},
+			},
+			nodePort:   30080,
+			result:     32000,
+			errMessage: "",
+		},
+		{
+			name: "auto with externalTrafficPolicy Cluster, fallback to nodePort",
+			svc: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"service.beta.kubernetes.io/scw-loadbalancer-health-check-port": "auto",
+					},
+				},
+				Spec: v1.ServiceSpec{
+					ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeCluster,
+					Ports: []v1.ServicePort{
+						{
+							NodePort: 30080,
+							Port:     80,
+						},
+					},
+				},
+			},
+			nodePort:   30080,
+			result:     30080,
+			errMessage: "",
+		},
+		{
+			name: "auto with externalTrafficPolicy Local but healthCheckNodePort is 0, fallback to nodePort",
+			svc: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"service.beta.kubernetes.io/scw-loadbalancer-health-check-port": "auto",
+					},
+				},
+				Spec: v1.ServiceSpec{
+					ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyTypeLocal,
+					HealthCheckNodePort:   0,
+					Ports: []v1.ServicePort{
+						{
+							NodePort: 30080,
+							Port:     80,
+						},
+					},
+				},
+			},
+			nodePort:   30080,
+			result:     30080,
+			errMessage: "",
+		},
 	}
 
 	for _, tc := range testCases {

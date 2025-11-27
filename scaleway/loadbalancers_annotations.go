@@ -88,8 +88,10 @@ const (
 
 	// serviceAnnotationLoadBalancerHealthCheckPort is the annotation to explicitly define the port used for health checks
 	// It is possible to set a single port for all backends like "18080" or per port like "80:10080;443:10443"
-	// The port must be a valid TCP/UDP port (1-65535)
+	// The special value "auto" will use the service's spec.healthCheckNodePort when externalTrafficPolicy is Local
+	// The port must be a valid TCP/UDP port (1-65535) or "auto"
 	// If not set, the service port is used as the health check port
+	// Note: In a future major release, "auto" will become the default behavior
 	serviceAnnotationLoadBalancerHealthCheckPort = "service.beta.kubernetes.io/scw-loadbalancer-health-check-port"
 
 	// serviceAnnotationLoadBalancerSendProxyV2 is the annotation that enables PROXY protocol version 2 (must be supported by backend servers)
@@ -637,6 +639,7 @@ func getHealthCheckTransientCheckDelay(service *v1.Service) (*scw.Duration, erro
 
 // getHealthCheckPort returns the port to use for health checks.
 // It supports per-port configuration with the format "80:10080;443:10443" or a single port like "18080".
+// The special value "auto" will use the service's spec.healthCheckNodePort when externalTrafficPolicy is Local.
 // If the annotation is not set, it returns the provided nodePort as default.
 func getHealthCheckPort(service *v1.Service, nodePort int32) (int32, error) {
 	annotation, ok := service.Annotations[serviceAnnotationLoadBalancerHealthCheckPort]
@@ -651,6 +654,14 @@ func getHealthCheckPort(service *v1.Service, nodePort int32) (int32, error) {
 	}
 
 	if portStr == "" {
+		return nodePort, nil
+	}
+
+	if strings.ToLower(portStr) == "auto" {
+		if service.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal && service.Spec.HealthCheckNodePort != 0 {
+			return service.Spec.HealthCheckNodePort, nil
+		}
+		klog.V(4).Infof("health-check-port set to 'auto' but externalTrafficPolicy is not Local or healthCheckNodePort is not set, using nodePort %d", nodePort)
 		return nodePort, nil
 	}
 
