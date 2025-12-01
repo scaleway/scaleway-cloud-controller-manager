@@ -434,6 +434,45 @@ func TestGetHealthCheckPort(t *testing.T) {
 			result:     0,
 			errMessage: "load balancer invalid annotation",
 		},
+		{
+			name: "standalone healthCheckNodePort has no effect",
+			svc: &v1.Service{
+				Spec: v1.ServiceSpec{
+					HealthCheckNodePort: 65535,
+					Ports: []v1.ServicePort{
+						{
+							NodePort: 30080,
+							Port:     80,
+						},
+					},
+				},
+			},
+			nodePort:   30080,
+			result:     30080,
+			errMessage: "",
+		},
+		{
+			name: "healthCheckNodePort with annotation has no effect",
+			svc: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"service.beta.kubernetes.io/scw-loadbalancer-health-check-port": "28390",
+					},
+				},
+				Spec: v1.ServiceSpec{
+					HealthCheckNodePort: 65535,
+					Ports: []v1.ServicePort{
+						{
+							NodePort: 30080,
+							Port:     80,
+						},
+					},
+				},
+			},
+			nodePort:   30080,
+			result:     28390,
+			errMessage: "",
+		},
 	}
 
 	for _, tc := range testCases {
