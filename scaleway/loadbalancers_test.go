@@ -1984,3 +1984,498 @@ func Test_ipMode(t *testing.T) {
 		})
 	}
 }
+
+func TestGetHealthCheckFromService(t *testing.T) {
+	testCases := []struct {
+		name            string
+		service         *v1.Service
+		port            int32
+		wantEnabled     bool
+		wantErr         bool
+		wantErrContains string
+	}{
+		{
+			name: "annotation not set",
+			service: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{},
+				},
+			},
+			port:        80,
+			wantEnabled: false,
+			wantErr:     false,
+		},
+		{
+			name: "annotation set to true",
+			service: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						serviceAnnotationLoadBalancerHealthCheckFromService: "true",
+					},
+				},
+			},
+			port:        80,
+			wantEnabled: true,
+			wantErr:     false,
+		},
+		{
+			name: "annotation set to false",
+			service: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						serviceAnnotationLoadBalancerHealthCheckFromService: "false",
+					},
+				},
+			},
+			port:        80,
+			wantEnabled: false,
+			wantErr:     false,
+		},
+		{
+			name: "annotation set to * (all ports)",
+			service: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						serviceAnnotationLoadBalancerHealthCheckFromService: "*",
+					},
+				},
+			},
+			port:        443,
+			wantEnabled: true,
+			wantErr:     false,
+		},
+		{
+			name: "annotation set to specific port - match",
+			service: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						serviceAnnotationLoadBalancerHealthCheckFromService: "80",
+					},
+				},
+			},
+			port:        80,
+			wantEnabled: true,
+			wantErr:     false,
+		},
+		{
+			name: "annotation set to specific port - no match",
+			service: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						serviceAnnotationLoadBalancerHealthCheckFromService: "80",
+					},
+				},
+			},
+			port:        443,
+			wantEnabled: false,
+			wantErr:     false,
+		},
+		{
+			name: "annotation set to comma-separated ports - match first",
+			service: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						serviceAnnotationLoadBalancerHealthCheckFromService: "80,443",
+					},
+				},
+			},
+			port:        80,
+			wantEnabled: true,
+			wantErr:     false,
+		},
+		{
+			name: "annotation set to comma-separated ports - match second",
+			service: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						serviceAnnotationLoadBalancerHealthCheckFromService: "80,443",
+					},
+				},
+			},
+			port:        443,
+			wantEnabled: true,
+			wantErr:     false,
+		},
+		{
+			name: "annotation set to comma-separated ports - no match",
+			service: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						serviceAnnotationLoadBalancerHealthCheckFromService: "80,443",
+					},
+				},
+			},
+			port:        8080,
+			wantEnabled: false,
+			wantErr:     false,
+		},
+		{
+			name: "annotation with invalid value",
+			service: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						serviceAnnotationLoadBalancerHealthCheckFromService: "invalid",
+					},
+				},
+			},
+			port:            80,
+			wantEnabled:     false,
+			wantErr:         true,
+			wantErrContains: "invalid health check annotation",
+		},
+		{
+			name: "annotation with negative port",
+			service: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						serviceAnnotationLoadBalancerHealthCheckFromService: "-1",
+					},
+				},
+			},
+			port:            80,
+			wantEnabled:     false,
+			wantErr:         true,
+			wantErrContains: "outside valid range",
+		},
+		{
+			name: "annotation with port 0",
+			service: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						serviceAnnotationLoadBalancerHealthCheckFromService: "0",
+					},
+				},
+			},
+			port:            80,
+			wantEnabled:     false,
+			wantErr:         true,
+			wantErrContains: "outside valid range",
+		},
+		{
+			name: "annotation with port > 65535",
+			service: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						serviceAnnotationLoadBalancerHealthCheckFromService: "99999",
+					},
+				},
+			},
+			port:            80,
+			wantEnabled:     false,
+			wantErr:         true,
+			wantErrContains: "outside valid range",
+		},
+		{
+			name: "annotation with mixed valid and invalid ports",
+			service: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						serviceAnnotationLoadBalancerHealthCheckFromService: "80,-1,443",
+					},
+				},
+			},
+			port:            443,
+			wantEnabled:     false,
+			wantErr:         true,
+			wantErrContains: "outside valid range",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Set healthCheckNodePort to test annotation parsing
+			tc.service.Spec.HealthCheckNodePort = 30100
+
+			hc, err := getNativeHealthCheck(tc.service, tc.port)
+
+			// Check error cases
+			if (err != nil) != tc.wantErr {
+				t.Errorf("getNativeHealthCheck() error = %v, wantErr %v", err, tc.wantErr)
+				return
+			}
+
+			if tc.wantErr && err != nil && tc.wantErrContains != "" {
+				if !strings.Contains(err.Error(), tc.wantErrContains) {
+					t.Errorf("getNativeHealthCheck() error = %q, want error containing %q", err.Error(), tc.wantErrContains)
+				}
+			}
+
+			// Check native health check is enabled/disabled as expected
+			isEnabled := (hc != nil)
+			if isEnabled != tc.wantEnabled {
+				t.Errorf("getNativeHealthCheck() returned healthCheck = %v (enabled=%v), want enabled=%v", hc, isEnabled, tc.wantEnabled)
+			}
+		})
+	}
+}
+
+func TestServicePortToBackendWithHealthCheckFromService(t *testing.T) {
+	const nonDefaultHealthCheckDelay = "2s"
+	const nonDefaultHealthCheckTimeout = "2s"
+	const nonDefaultHealthCheckMaxRetries = "2"
+	const nonDefaultHealthCheckTransientCheckDelay = "2s"
+
+	testCases := []struct {
+		name            string
+		service         *v1.Service
+		port            v1.ServicePort
+		wantNativeHC    bool
+		wantHealthPort  int32
+		wantErr         bool
+		wantErrContains string
+	}{
+		{
+			name: "native health check enabled",
+			service: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					UID: "test-uid",
+					Annotations: map[string]string{
+						serviceAnnotationLoadBalancerHealthCheckFromService: "true",
+					},
+				},
+				Spec: v1.ServiceSpec{
+					HealthCheckNodePort: 30100,
+					Ports: []v1.ServicePort{
+						{Port: 80, NodePort: 30000},
+					},
+				},
+			},
+			port: v1.ServicePort{
+				Port:     80,
+				NodePort: 30000,
+			},
+			wantNativeHC:   true,
+			wantHealthPort: 30100,
+		},
+		{
+			name: "native health check disabled - uses classic",
+			service: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					UID: "test-uid",
+					Annotations: map[string]string{
+						serviceAnnotationLoadBalancerHealthCheckType:    "http",
+						serviceAnnotationLoadBalancerHealthCheckHTTPURI: "/custom",
+					},
+				},
+				Spec: v1.ServiceSpec{
+					HealthCheckNodePort: 30100,
+					Ports: []v1.ServicePort{
+						{Port: 80, NodePort: 30000},
+					},
+				},
+			},
+			port: v1.ServicePort{
+				Port:     80,
+				NodePort: 30000,
+			},
+			wantNativeHC:   false,
+			wantHealthPort: 30000, // uses NodePort
+		},
+		{
+			name: "native enabled but healthCheckNodePort is 0 - falls back to classic",
+			service: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					UID: "test-uid",
+					Annotations: map[string]string{
+						serviceAnnotationLoadBalancerHealthCheckFromService: "true",
+						serviceAnnotationLoadBalancerHealthCheckType:        "tcp",
+					},
+				},
+				Spec: v1.ServiceSpec{
+					HealthCheckNodePort: 0,
+					Ports: []v1.ServicePort{
+						{Port: 80, NodePort: 30000},
+					},
+				},
+			},
+			port: v1.ServicePort{
+				Port:     80,
+				NodePort: 30000,
+			},
+			wantNativeHC:   false,
+			wantHealthPort: 30000,
+		},
+		{
+			name: "invalid healthCheckNodePort - negative",
+			service: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					UID: "test-uid",
+					Annotations: map[string]string{
+						serviceAnnotationLoadBalancerHealthCheckFromService: "true",
+					},
+				},
+				Spec: v1.ServiceSpec{
+					HealthCheckNodePort: -1,
+					Ports: []v1.ServicePort{
+						{Port: 80, NodePort: 30000},
+					},
+				},
+			},
+			port: v1.ServicePort{
+				Port:     80,
+				NodePort: 30000,
+			},
+			wantErr:         true,
+			wantErrContains: "invalid healthCheckNodePort",
+		},
+		{
+			name: "invalid healthCheckNodePort - too high",
+			service: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					UID: "test-uid",
+					Annotations: map[string]string{
+						serviceAnnotationLoadBalancerHealthCheckFromService: "true",
+					},
+				},
+				Spec: v1.ServiceSpec{
+					HealthCheckNodePort: 99999,
+					Ports: []v1.ServicePort{
+						{Port: 80, NodePort: 30000},
+					},
+				},
+			},
+			port: v1.ServicePort{
+				Port:     80,
+				NodePort: 30000,
+			},
+			wantErr:         true,
+			wantErrContains: "invalid healthCheckNodePort",
+		},
+		{
+			name: "native health check enabled - keep health check config",
+			service: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					UID: "test-uid",
+					Annotations: map[string]string{
+						serviceAnnotationLoadBalancerHealthCheckFromService:    "true",
+						serviceAnnotationLoadBalancerHealthCheckDelay:          nonDefaultHealthCheckDelay,
+						serviceAnnotationLoadBalancerHealthCheckTimeout:        nonDefaultHealthCheckTimeout,
+						serviceAnnotationLoadBalancerHealthCheckMaxRetries:     nonDefaultHealthCheckMaxRetries,
+						serviceAnnotationLoadBalancerHealthTransientCheckDelay: nonDefaultHealthCheckTransientCheckDelay,
+					},
+				},
+				Spec: v1.ServiceSpec{
+					HealthCheckNodePort: 30100,
+					Ports: []v1.ServicePort{
+						{Port: 80, NodePort: 30000},
+					},
+				},
+			},
+			port: v1.ServicePort{
+				Port:     80,
+				NodePort: 30000,
+			},
+			wantNativeHC:   true,
+			wantHealthPort: 30100,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			backend, err := servicePortToBackend(tc.service, &scwlb.LB{ID: "test-lb"}, tc.port, []string{"10.0.0.1"})
+
+			// Check error cases
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("Expected error but got nil")
+				}
+				if tc.wantErrContains != "" && !strings.Contains(err.Error(), tc.wantErrContains) {
+					t.Errorf("Expected error containing %q, got %q", tc.wantErrContains, err.Error())
+				}
+				return
+			}
+
+			// Check success cases
+			if err != nil {
+				t.Fatalf("servicePortToBackend() error = %v", err)
+			}
+
+			if backend == nil {
+				t.Fatal("servicePortToBackend() returned nil backend")
+			}
+
+			if backend.HealthCheck == nil {
+				t.Fatal("backend.HealthCheck is nil")
+			}
+
+			// Verify health check port
+			if backend.HealthCheck.Port != tc.wantHealthPort {
+				t.Errorf("HealthCheck.Port = %v, want %v", backend.HealthCheck.Port, tc.wantHealthPort)
+			}
+
+			// Verify native health check configuration
+			if tc.wantNativeHC {
+				if backend.HealthCheck.HTTPConfig == nil {
+					t.Error("Expected HTTPConfig for native health check, got nil")
+				} else {
+					wantHTTPConfig := &scwlb.HealthCheckHTTPConfig{
+						Method: "GET",
+						Code:   scw.Int32Ptr(200),
+						URI:    "/healthz",
+					}
+					if !reflect.DeepEqual(backend.HealthCheck.HTTPConfig, wantHTTPConfig) {
+						t.Errorf("HealthCheck.HTTPConfig = %v, want %v", backend.HealthCheck.HTTPConfig, wantHTTPConfig)
+					}
+					notAlteredDelay, err := getHealthCheckDelay(tc.service)
+					if err != nil {
+						t.Errorf("error getting health check delay %q", err.Error())
+					}
+					if *backend.HealthCheck.CheckDelay != notAlteredDelay {
+						t.Errorf("HealthCheck.CheckDelay = %v, want %v", backend.HealthCheck.CheckDelay, notAlteredDelay)
+					}
+					notAlteredTimeout, err := getHealthCheckTimeout(tc.service)
+					if err != nil {
+						t.Errorf("error getting health check timeout %q", err.Error())
+					}
+					if *backend.HealthCheck.CheckTimeout != notAlteredTimeout {
+						t.Errorf("HealthCheck.CheckTimeout = %v, want %v", backend.HealthCheck.CheckTimeout, notAlteredTimeout)
+					}
+					notAlteredMaxRetries, err := getHealthCheckMaxRetries(tc.service)
+					if err != nil {
+						t.Errorf("error getting health check maxRetries %q", err.Error())
+					}
+					if !reflect.DeepEqual(backend.HealthCheck.CheckMaxRetries, notAlteredMaxRetries) {
+						t.Errorf("HealthCheck.CheckMaxRetries = %v, want %v", backend.HealthCheck.CheckMaxRetries, notAlteredMaxRetries)
+					}
+					notAlteredTranscientCheckDelay, err := getHealthCheckTransientCheckDelay(tc.service)
+					if err != nil {
+						t.Errorf("error getting health check transcientCheckDelay %q", err.Error())
+					}
+					if !reflect.DeepEqual(backend.HealthCheck.TransientCheckDelay, notAlteredTranscientCheckDelay) {
+						t.Errorf("HealthCheck.CheckMaxRetries = %v, want %v", backend.HealthCheck.TransientCheckDelay, notAlteredTranscientCheckDelay)
+					}
+					if tc.wantNativeHC {
+						if backend.HealthCheck.CheckSendProxy {
+							t.Errorf("HealthCheck.CheckSendProxy should be false when native kubernetes health check is used")
+						}
+					}
+				}
+			}
+
+			// Exactly one health check config must be set
+			configs := []struct {
+				name string
+				set  bool
+			}{
+				{"HTTPConfig", backend.HealthCheck.HTTPConfig != nil},
+				{"HTTPSConfig", backend.HealthCheck.HTTPSConfig != nil},
+				{"TCPConfig", backend.HealthCheck.TCPConfig != nil},
+				{"MysqlConfig", backend.HealthCheck.MysqlConfig != nil},
+				{"PgsqlConfig", backend.HealthCheck.PgsqlConfig != nil},
+				{"RedisConfig", backend.HealthCheck.RedisConfig != nil},
+				{"LdapConfig", backend.HealthCheck.LdapConfig != nil},
+			}
+
+			var setConfigs []string
+			for _, cfg := range configs {
+				if cfg.set {
+					setConfigs = append(setConfigs, cfg.name)
+				}
+			}
+
+			if len(setConfigs) != 1 {
+				t.Errorf("Expected exactly 1 health check config to be set, got %d: %v", len(setConfigs), setConfigs)
+			}
+		})
+	}
+}

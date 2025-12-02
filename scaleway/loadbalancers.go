@@ -994,6 +994,10 @@ func isPortInRange(r string, p int32) (bool, error) {
 		if err != nil {
 			return false, err
 		}
+		// Validate port is within valid range (1-65535)
+		if intPort < 1 || intPort > 65535 {
+			return false, fmt.Errorf("port %d is outside valid range (1-65535)", intPort)
+		}
 		if int64(p) == intPort {
 			return true, nil
 		}
@@ -1158,8 +1162,74 @@ func servicePortToBackend(service *v1.Service, loadbalancer *scwlb.LB, port v1.S
 		return nil, err
 	}
 
-	healthCheck := &scwlb.HealthCheck{
-		Port: port.NodePort,
+	healthCheck, err := getNativeHealthCheck(service, port.Port)
+	if err != nil {
+		return nil, err
+	}
+
+	if healthCheck == nil {
+		healthCheck = &scwlb.HealthCheck{
+			Port: port.NodePort,
+		}
+
+		healthCheckType, err := getHealthCheckType(service, port.NodePort)
+		if err != nil {
+			return nil, err
+		}
+
+		switch healthCheckType {
+		case "mysql":
+			hc, err := getMysqlHealthCheck(service, port.NodePort)
+			if err != nil {
+				return nil, err
+			}
+			healthCheck.MysqlConfig = hc
+		case "ldap":
+			hc, err := getLdapHealthCheck(service, port.NodePort)
+			if err != nil {
+				return nil, err
+			}
+			healthCheck.LdapConfig = hc
+		case "redis":
+			hc, err := getRedisHealthCheck(service, port.NodePort)
+			if err != nil {
+				return nil, err
+			}
+			healthCheck.RedisConfig = hc
+		case "pgsql":
+			hc, err := getPgsqlHealthCheck(service, port.NodePort)
+			if err != nil {
+				return nil, err
+			}
+			healthCheck.PgsqlConfig = hc
+		case "tcp":
+			hc, err := getTCPHealthCheck(service, port.NodePort)
+			if err != nil {
+				return nil, err
+			}
+			healthCheck.TCPConfig = hc
+		case "http":
+			hc, err := getHTTPHealthCheck(service, port.NodePort)
+			if err != nil {
+				return nil, err
+			}
+			healthCheck.HTTPConfig = hc
+		case "https":
+			hc, err := getHTTPSHealthCheck(service, port.NodePort)
+			if err != nil {
+				return nil, err
+			}
+			healthCheck.HTTPSConfig = hc
+		default:
+			klog.Errorf("wrong value for healthCheckType")
+			return nil, errLoadBalancerInvalidAnnotation
+		}
+
+		healthCheckSendProxy, err := getHealthCheckSendProxy(service)
+		if err != nil {
+			return nil, err
+		}
+		healthCheck.CheckSendProxy = healthCheckSendProxy
 	}
 
 	healthCheckDelay, err := getHealthCheckDelay(service)
@@ -1185,65 +1255,6 @@ func servicePortToBackend(service *v1.Service, loadbalancer *scwlb.LB, port v1.S
 		return nil, err
 	}
 	healthCheck.TransientCheckDelay = healthCheckTransientCheckDelay
-
-	healthCheckSendProxy, err := getHealthCheckSendProxy(service)
-	if err != nil {
-		return nil, err
-	}
-	healthCheck.CheckSendProxy = healthCheckSendProxy
-
-	healthCheckType, err := getHealthCheckType(service, port.NodePort)
-	if err != nil {
-		return nil, err
-	}
-
-	switch healthCheckType {
-	case "mysql":
-		hc, err := getMysqlHealthCheck(service, port.NodePort)
-		if err != nil {
-			return nil, err
-		}
-		healthCheck.MysqlConfig = hc
-	case "ldap":
-		hc, err := getLdapHealthCheck(service, port.NodePort)
-		if err != nil {
-			return nil, err
-		}
-		healthCheck.LdapConfig = hc
-	case "redis":
-		hc, err := getRedisHealthCheck(service, port.NodePort)
-		if err != nil {
-			return nil, err
-		}
-		healthCheck.RedisConfig = hc
-	case "pgsql":
-		hc, err := getPgsqlHealthCheck(service, port.NodePort)
-		if err != nil {
-			return nil, err
-		}
-		healthCheck.PgsqlConfig = hc
-	case "tcp":
-		hc, err := getTCPHealthCheck(service, port.NodePort)
-		if err != nil {
-			return nil, err
-		}
-		healthCheck.TCPConfig = hc
-	case "http":
-		hc, err := getHTTPHealthCheck(service, port.NodePort)
-		if err != nil {
-			return nil, err
-		}
-		healthCheck.HTTPConfig = hc
-	case "https":
-		hc, err := getHTTPSHealthCheck(service, port.NodePort)
-		if err != nil {
-			return nil, err
-		}
-		healthCheck.HTTPSConfig = hc
-	default:
-		klog.Errorf("wrong value for healthCheckType")
-		return nil, errLoadBalancerInvalidAnnotation
-	}
 
 	backend := &scwlb.Backend{
 		Name:                   fmt.Sprintf("%s_tcp_%d", string(service.UID), port.NodePort),
