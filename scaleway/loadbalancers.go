@@ -578,6 +578,12 @@ func (l *loadbalancers) unannotateAndPatch(service *v1.Service) error {
 
 // updateLoadBalancer updates the loadbalancer's resources
 func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *scwlb.LB, service *v1.Service, nodes []*v1.Node) error {
+	// Skip update if the service is being deleted
+	if service.ObjectMeta.DeletionTimestamp != nil {
+		klog.V(3).Infof("skipping loadbalancer update for service %s/%s: service is being deleted", service.Namespace, service.Name)
+		return nil
+	}
+
 	lbExternallyManaged, err := svcExternallyManaged(service)
 	if err != nil {
 		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerExternallyManaged)
