@@ -239,3 +239,18 @@ This annotation is ignored when `service.beta.kubernetes.io/scw-loadbalancer-ext
 The possible formats are:
 - `<pn-id>`: will attach a single Private Network to the LB.
 - `<pn-id>,<pn-id>`: will attach the two Private Networks to the LB.
+
+### `service.beta.kubernetes.io/scw-loadbalancer-health-check-from-service`
+
+This is the annotation to configure the load balancer backend to use the service's `healthCheckNodePort` for health checks.
+When enabled for a port, the health check will use the `healthCheckNodePort` from the service specification instead of the regular `NodePort`.
+This is particularly useful when the service has `externalTrafficPolicy: Local`, which automatically allocates a `healthCheckNodePort` for health checking.
+The possible values are `false`, `true` or `*` for all ports or a comma delimited list of the service ports (for instance `80,443`).
+
+**Important:** When this annotation is enabled, the health check configuration is overridden with the following settings:
+- **Protocol:** HTTP
+- **Method:** GET
+- **URI:** `/healthz`
+- **Expected Code:** 200
+
+This configuration is specifically designed to work with Kubernetes' standard health check endpoint. All other health check type annotations (such as `service.beta.kubernetes.io/scw-loadbalancer-health-check-type`, `service.beta.kubernetes.io/scw-loadbalancer-health-check-http-uri`, etc.) are ignored for the ports where this annotation is enabled.

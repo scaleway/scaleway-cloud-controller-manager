@@ -236,6 +236,12 @@ const (
 	//	- "<pn-id>": will attach a single Private Network to the LB.
 	//	- "<pn-id>,<pn-id>": will attach the two Private Networks to the LB.
 	serviceAnnotationPrivateNetworkIDs = "service.beta.kubernetes.io/scw-loadbalancer-pn-ids"
+
+	// serviceAnnotationLoadBalancerHealthCheckFromService is the annotation to use healthCheckNodePort from the service
+	// The possible values are "false", "true" or "*" for all ports or a comma delimited list of the service port
+	// (for instance "80,443"). When enabled for a port, the health check will use the service's healthCheckNodePort
+	// instead of the regular NodePort, overriding any other health check configuration.
+	serviceAnnotationLoadBalancerHealthCheckFromService = "service.beta.kubernetes.io/scw-loadbalancer-health-check-from-service"
 )
 
 func getLoadBalancerID(service *v1.Service) (scw.Zone, string, error) {
@@ -1056,4 +1062,42 @@ func getEnableHTTP3(service *v1.Service) (bool, error) {
 		return false, nil
 	}
 	return strconv.ParseBool(enableHTTP3)
+}
+
+// getNativeHealthCheck returns the healthCheckNodePort config if the feature is enabled.
+// Returns nil if standard legacy logic should be used.
+func getNativeHealthCheck(service *v1.Service, targetPort int32) (*scwlb.HealthCheck, error) {
+	annotationValue := service.Annotations[serviceAnnotationLoadBalancerHealthCheckFromService]
+	isEnabled, err := isPortInRange(annotationValue, targetPort)
+	if err != nil {
+		return nil, fmt.Errorf("invalid health check annotation: %w", err)
+	}
+
+	if !isEnabled {
+		return nil, nil
+	}
+
+	// If the user requested the feature but K8s hasn't assigned the port yet (usually means
+	// externalTrafficPolicy is not set to Local), we must fall back to avoid blackholing traffic.
+	hcNodePort := service.Spec.HealthCheckNodePort
+	if hcNodePort == 0 {
+		klog.Warningf("Annotation '%s' is active for %s/%s, but HealthCheckNodePort is 0. "+
+			"Ensure 'externalTrafficPolicy: Local'. Falling back to standard NodePort.",
+			serviceAnnotationLoadBalancerHealthCheckFromService, service.Namespace, service.Name)
+		return nil, nil
+	}
+
+	// Validate healthCheckNodePort is within valid range
+	if hcNodePort < 1 || hcNodePort > 65535 {
+		return nil, fmt.Errorf("invalid healthCheckNodePort %d: port must be in range 1-65535", hcNodePort)
+	}
+
+	return &scwlb.HealthCheck{
+		Port: hcNodePort,
+		HTTPConfig: &scwlb.HealthCheckHTTPConfig{
+			Method: "GET",
+			Code:   scw.Int32Ptr(200),
+			URI:    "/healthz",
+		},
+	}, nil
 }
