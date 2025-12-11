@@ -1,8 +1,8 @@
 module github.com/scaleway/scaleway-cloud-controller-manager
 
-go 1.24.0
+go 1.25
 
-toolchain go1.24.6
+toolchain go1.25.5
 
 require (
 	github.com/scaleway/scaleway-sdk-go v1.0.0-beta.35.0.20251029154854-a599ef194f4a
