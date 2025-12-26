@@ -7,7 +7,7 @@ toolchain go1.25.5
 require (
 	github.com/scaleway/scaleway-sdk-go v1.0.0-beta.35.0.20251029154854-a599ef194f4a
 	golang.org/x/exp v0.0.0-20250813145105-42675adae3e6
-	google.golang.org/protobuf v1.36.10
+	google.golang.org/protobuf v1.36.11
 	k8s.io/api v0.34.3
 	k8s.io/apimachinery v0.34.3
 	k8s.io/client-go v0.34.3
