@@ -57,6 +57,7 @@ type LoadBalancerAPI interface {
 	ListLBs(req *scwlb.ZonedAPIListLBsRequest, opts ...scw.RequestOption) (*scwlb.ListLBsResponse, error)
 	GetLB(req *scwlb.ZonedAPIGetLBRequest, opts ...scw.RequestOption) (*scwlb.LB, error)
 	CreateLB(req *scwlb.ZonedAPICreateLBRequest, opts ...scw.RequestOption) (*scwlb.LB, error)
+	UpdateLB(req *scwlb.ZonedAPIUpdateLBRequest, opts ...scw.RequestOption) (*scwlb.LB, error)
 	DeleteLB(req *scwlb.ZonedAPIDeleteLBRequest, opts ...scw.RequestOption) error
 	MigrateLB(req *scwlb.ZonedAPIMigrateLBRequest, opts ...scw.RequestOption) (*scwlb.LB, error)
 	ListIPs(req *scwlb.ZonedAPIListIPsRequest, opts ...scw.RequestOption) (*scwlb.ListIPsResponse, error)
@@ -469,6 +470,12 @@ func (l *loadbalancers) createLoadBalancer(ctx context.Context, clusterName stri
 		return nil, fmt.Errorf("invalid value for annotation %s: expected boolean", serviceAnnotationLoadBalancerPrivate)
 	}
 
+	sslCompatibilityLevel, err := getSSLCompatibilityLevel(service)
+	if err != nil {
+		klog.Errorf("error getting SSL compatibility level for service %s(%s): %v", service.Name, service.UID, err)
+		return nil, fmt.Errorf("error getting SSL compatibility level for service %s(%s): %v", service.Name, service.UID, err)
+	}
+
 	// Attach specific IP if set
 	var ipIDs []string
 	if !lbPrivate {
@@ -503,7 +510,8 @@ func (l *loadbalancers) createLoadBalancer(ctx context.Context, clusterName stri
 		Type:        lbType,
 		// We must only assign a flexible IP if LB is public AND no IP ID is provided.
 		// If IP IDs are provided, there must be at least one IPv4.
-		AssignFlexibleIP: scw.BoolPtr(!lbPrivate && len(ipIDs) == 0),
+		AssignFlexibleIP:      scw.BoolPtr(!lbPrivate && len(ipIDs) == 0),
+		SslCompatibilityLevel: sslCompatibilityLevel,
 	}
 	lb, err := l.api.CreateLB(&request)
 	if err != nil {
@@ -774,6 +782,27 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 				Zone: loadbalancer.Zone,
 				LBID: loadbalancer.ID,
 				Type: loadBalancerType,
+			})
+			if err != nil {
+				klog.Errorf("error updating load balancer %s: %v", loadbalancer.ID, err)
+				return fmt.Errorf("error updating load balancer %s: %v", loadbalancer.ID, err)
+			}
+		}
+
+		// Update SSL compatibility level if needed
+		sslCompatibilityLevel, err := getSSLCompatibilityLevel(service)
+		if err != nil {
+			klog.Errorf("error getting SSL compatibility level on the service %s for load balancer %s: %v", service.Name, loadbalancer.ID, err)
+			return fmt.Errorf("error getting SSL compatibility level on the service %s for load balancer %s: %v", service.Name, loadbalancer.ID, err)
+		}
+		if loadbalancer.SslCompatibilityLevel != sslCompatibilityLevel {
+			_, err := l.api.UpdateLB(&scwlb.ZonedAPIUpdateLBRequest{
+				Zone:                  loadbalancer.Zone,
+				LBID:                  loadbalancer.ID,
+				Name:                  loadbalancer.Name,
+				Description:           loadbalancer.Description,
+				Tags:                  loadbalancer.Tags,
+				SslCompatibilityLevel: sslCompatibilityLevel,
 			})
 			if err != nil {
 				klog.Errorf("error updating load balancer %s: %v", loadbalancer.ID, err)

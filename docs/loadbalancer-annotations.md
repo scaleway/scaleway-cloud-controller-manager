@@ -123,6 +123,11 @@ The default value is `false`. The possible values are `false` or `true`.
 This is the annotation to enable HTTP/3 protocol for the load balancer.
 The default value is `false`. The possible values are `false` or `true`.
 
+### `service.beta.kubernetes.io/scw-loadbalancer-ssl-compatibility-level`
+This is the annotation to set the minimal SSL version supported on the client side.
+The default value is `ssl_compatibility_level_intermediate`.
+The possible values are `ssl_compatibility_level_intermediate`, `ssl_compatibility_level_modern`, and `ssl_compatibility_level_old`.
+
 ### `service.beta.kubernetes.io/scw-loadbalancer-timeout-client`
 This is the annotation to set the maximum client connection inactivity time.
 The default value is `10m`. The duration are go's time.Duration (ex: `1s`, `2m`, `4h`, ...).

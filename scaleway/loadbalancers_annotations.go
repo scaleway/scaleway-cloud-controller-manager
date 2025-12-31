@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/exp/slices"
 	"google.golang.org/protobuf/types/known/durationpb"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
@@ -119,6 +120,10 @@ const (
 	// serviceAnnotationLoadBalancerEnableHTTP3 is the annotation to enable HTTP/3 protocol for the load balancer.
 	// The default value is "false". The possible values are "false" or "true".
 	serviceAnnotationLoadBalancerEnableHTTP3 = "service.beta.kubernetes.io/scw-loadbalancer-enable-http3"
+
+	// serviceAnnotationLoadBalancerSSLCompatibilityLevel is the annotation to set the minimal SSL version supported on the client side.
+	// The default value is "ssl_compatibility_level_intermediate".
+	serviceAnnotationLoadBalancerSSLCompatibilityLevel = "service.beta.kubernetes.io/scw-loadbalancer-ssl-compatibility-level"
 
 	// serviceAnnotationLoadBalancerTimeoutClient is the maximum client connection inactivity time
 	// The default value is "10m". The duration are go's time.Duration (ex: "1s", "2m", "4h", ...)
@@ -1100,4 +1105,19 @@ func getNativeHealthCheck(service *v1.Service, targetPort int32) (*scwlb.HealthC
 			URI:    "/healthz",
 		},
 	}, nil
+}
+
+func getSSLCompatibilityLevel(service *v1.Service) (scwlb.SSLCompatibilityLevel, error) {
+	sslCompatibilityLevel := service.Annotations[serviceAnnotationLoadBalancerSSLCompatibilityLevel]
+	if sslCompatibilityLevel == "" {
+		return scwlb.SSLCompatibilityLevelSslCompatibilityLevelIntermediate, nil
+	}
+
+	level := scwlb.SSLCompatibilityLevel(sslCompatibilityLevel)
+	if !slices.Contains(level.Values(), level) {
+		klog.Errorf("invalid value for annotation %s", serviceAnnotationLoadBalancerSSLCompatibilityLevel)
+		return "", errLoadBalancerInvalidAnnotation
+	}
+
+	return level, nil
 }

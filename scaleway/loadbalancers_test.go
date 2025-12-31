@@ -1849,6 +1849,88 @@ func Test_nodesInitialized(t *testing.T) {
 	}
 }
 
+func TestGetSSLCompatibilityLevel(t *testing.T) {
+	matrix := []struct {
+		name    string
+		service *v1.Service
+		want    scwlb.SSLCompatibilityLevel
+		wantErr bool
+	}{
+		{
+			"with empty annotation",
+			&v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{},
+				},
+			},
+			scwlb.SSLCompatibilityLevelSslCompatibilityLevelIntermediate,
+			false,
+		},
+		{
+			"with valid intermediate level",
+			&v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"service.beta.kubernetes.io/scw-loadbalancer-ssl-compatibility-level": "ssl_compatibility_level_intermediate",
+					},
+				},
+			},
+			scwlb.SSLCompatibilityLevelSslCompatibilityLevelIntermediate,
+			false,
+		},
+		{
+			"with valid modern level",
+			&v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"service.beta.kubernetes.io/scw-loadbalancer-ssl-compatibility-level": "ssl_compatibility_level_modern",
+					},
+				},
+			},
+			scwlb.SSLCompatibilityLevelSslCompatibilityLevelModern,
+			false,
+		},
+		{
+			"with valid old level",
+			&v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"service.beta.kubernetes.io/scw-loadbalancer-ssl-compatibility-level": "ssl_compatibility_level_old",
+					},
+				},
+			},
+			scwlb.SSLCompatibilityLevelSslCompatibilityLevelOld,
+			false,
+		},
+		{
+			"with invalid level",
+			&v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"service.beta.kubernetes.io/scw-loadbalancer-ssl-compatibility-level": "invalid_level",
+					},
+				},
+			},
+			"",
+			true,
+		},
+	}
+
+	for _, tt := range matrix {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := getSSLCompatibilityLevel(tt.service)
+			if tt.wantErr != (err != nil) {
+				t.Errorf("got error: %s, expected: %v", err, tt.wantErr)
+				return
+			}
+
+			if got != tt.want {
+				t.Errorf("want: %v, got: %v", tt.want, got)
+			}
+		})
+	}
+}
+
 func Test_ipMode(t *testing.T) {
 	type args struct {
 		service *v1.Service
