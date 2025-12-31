@@ -68,6 +68,7 @@ var (
 	labelsPrefix        = "k8s.scaleway.com/"
 	taintsPrefix        = "k8s.scaleway.com/"
 	labelTaintPrefix    = "taint="
+	startupTaintPrefix  = "startup-taint="
 	labelNoPrefix       = "noprefix="
 
 	// K8S labels
@@ -205,6 +206,9 @@ func (s *syncController) syncNodeTags(node *v1.Node) error {
 	// Note: taints must be unique by key and effect pair
 	nodeTaints := map[string]v1.Taint{}
 	for _, tag := range server.Server.Tags {
+		if strings.HasPrefix(tag, startupTaintPrefix) {
+			continue
+		}
 		if strings.HasPrefix(tag, labelTaintPrefix) {
 			key, value, effect := tagTaintParser(tag)
 			if key == "" {

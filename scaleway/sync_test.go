@@ -41,6 +41,7 @@ func TestTagTaintParser(t *testing.T) {
 		"taint=dash-word=dash-word":                                       {"", "", ""},
 		"taint=noprefix=dash-word=dash-word:PreferNoSchedule":             {"dash-word", "dash-word", "PreferNoSchedule"},
 		"taint=noprefix=node.k8s.io/dash-word=dash-word:PreferNoSchedule": {"node.k8s.io/dash-word", "dash-word", "PreferNoSchedule"},
+		"startup-taint=value":                                             {"", ""},
 	}
 	for tag, expected := range tagsTest {
 		t.Run(tag, func(t *testing.T) {
