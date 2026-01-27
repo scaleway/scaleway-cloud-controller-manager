@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	scwinstance "github.com/scaleway/scaleway-sdk-go/api/instance/v1"
+	scwipam "github.com/scaleway/scaleway-sdk-go/api/ipam/v1"
 	"github.com/scaleway/scaleway-sdk-go/scw"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -134,6 +135,59 @@ func newFakeInstanceAPI() *fakeInstanceAPI {
 				CommercialType: "GP1-XS",
 				State:          scwinstance.ServerStateStarting,
 			},
+			// a server with private network only (no public IP)
+			"private-only-server-id": {
+				Zone:           "fr-par-2",
+				Name:           "scw-private-only",
+				CommercialType: "PLAY2-NANO",
+				State:          scwinstance.ServerStateRunning,
+				Project:        "test-project",
+				PrivateNics: []*scwinstance.PrivateNIC{
+					{
+						ID:               "nic-private-only",
+						PrivateNetworkID: "pn-12345",
+					},
+				},
+			},
+			// a server with both public and private network
+			"both-networks-server-id": {
+				Zone:           "fr-par-2",
+				Name:           "scw-both-networks",
+				CommercialType: "PLAY2-NANO",
+				State:          scwinstance.ServerStateRunning,
+				Project:        "test-project",
+				PublicIPs: []*scwinstance.ServerIP{
+					{
+						Address:          net.ParseIP("51.159.100.1"),
+						ProvisioningMode: scwinstance.ServerIPProvisioningModeDHCP,
+						Family:           scwinstance.ServerIPIPFamilyInet,
+					},
+				},
+				PrivateNics: []*scwinstance.PrivateNIC{
+					{
+						ID:               "nic-both-networks",
+						PrivateNetworkID: "pn-12345",
+					},
+				},
+			},
+			// a server with multiple private networks
+			"multi-pn-server-id": {
+				Zone:           "fr-par-2",
+				Name:           "scw-multi-pn",
+				CommercialType: "PLAY2-NANO",
+				State:          scwinstance.ServerStateRunning,
+				Project:        "test-project",
+				PrivateNics: []*scwinstance.PrivateNIC{
+					{
+						ID:               "nic-private-only",
+						PrivateNetworkID: "pn-12345",
+					},
+					{
+						ID:               "nic-other-pn",
+						PrivateNetworkID: "pn-67890",
+					},
+				},
+			},
 		},
 	}
 }
@@ -171,9 +225,65 @@ func (f *fakeInstanceAPI) GetServer(req *scwinstance.GetServerRequest, opts ...s
 	}, nil
 }
 
+// fakeIPAMAPI implements IPAMAPI for testing
+type fakeIPAMAPI struct {
+	// IPs maps NIC ID to list of IPs
+	IPs map[string][]*scwipam.IP
+}
+
+func newFakeIPAMAPI() *fakeIPAMAPI {
+	return &fakeIPAMAPI{
+		IPs: map[string][]*scwipam.IP{
+			// IPs for private NIC on server with private network only
+			"nic-private-only": {
+				{
+					Address: scw.IPNet{IPNet: net.IPNet{IP: net.ParseIP("10.200.0.5"), Mask: net.CIDRMask(20, 32)}},
+				},
+			},
+			// IPs for private NIC on server with both public and private
+			"nic-both-networks": {
+				{
+					Address: scw.IPNet{IPNet: net.IPNet{IP: net.ParseIP("10.200.0.10"), Mask: net.CIDRMask(20, 32)}},
+				},
+			},
+			// IPs for another private network
+			"nic-other-pn": {
+				{
+					Address: scw.IPNet{IPNet: net.IPNet{IP: net.ParseIP("192.168.1.5"), Mask: net.CIDRMask(24, 32)}},
+				},
+			},
+		},
+	}
+}
+
+func (f *fakeIPAMAPI) ListIPs(req *scwipam.ListIPsRequest, opts ...scw.RequestOption) (*scwipam.ListIPsResponse, error) {
+	if req.ResourceID == nil {
+		return &scwipam.ListIPsResponse{IPs: []*scwipam.IP{}}, nil
+	}
+
+	ips, ok := f.IPs[*req.ResourceID]
+	if !ok {
+		return &scwipam.ListIPsResponse{IPs: []*scwipam.IP{}}, nil
+	}
+
+	return &scwipam.ListIPsResponse{
+		IPs:        ips,
+		TotalCount: uint64(len(ips)),
+	}, nil
+}
+
 func newFakeInstances() *instances {
 	return &instances{
-		api: newFakeInstanceAPI(),
+		api:  newFakeInstanceAPI(),
+		ipam: newFakeIPAMAPI(),
+	}
+}
+
+func newFakeInstancesWithPNID(pnID string) *instances {
+	return &instances{
+		api:  newFakeInstanceAPI(),
+		ipam: newFakeIPAMAPI(),
+		pnID: pnID,
 	}
 }
 
@@ -575,5 +685,82 @@ func TestInstances_InstanceMetadata(t *testing.T) {
 		Equals(t, nodeType, metadata.InstanceType)
 		Equals(t, providerID, metadata.ProviderID)
 
+	})
+}
+
+func TestInstances_PrivateNetworkAddresses(t *testing.T) {
+	t.Run("PrivateNetworkOnly_NoPNID", func(t *testing.T) {
+		// When no pnID is configured, the CCM should discover private IPs from all NICs
+		instance := newFakeInstances()
+
+		expectedAddresses := []v1.NodeAddress{
+			{Type: v1.NodeHostName, Address: "scw-private-only"},
+			{Type: v1.NodeInternalIP, Address: "10.200.0.5"},
+		}
+
+		returnedAddresses, err := instance.NodeAddressesByProviderID(context.TODO(), "scaleway://instance/fr-par-2/private-only-server-id")
+		AssertNoError(t, err)
+		Equals(t, expectedAddresses, returnedAddresses)
+	})
+
+	t.Run("PrivateNetworkOnly_WithPNID", func(t *testing.T) {
+		// When pnID is configured, only look for that specific private network
+		instance := newFakeInstancesWithPNID("pn-12345")
+
+		expectedAddresses := []v1.NodeAddress{
+			{Type: v1.NodeHostName, Address: "scw-private-only"},
+			{Type: v1.NodeInternalIP, Address: "10.200.0.5"},
+		}
+
+		returnedAddresses, err := instance.NodeAddressesByProviderID(context.TODO(), "scaleway://instance/fr-par-2/private-only-server-id")
+		AssertNoError(t, err)
+		Equals(t, expectedAddresses, returnedAddresses)
+	})
+
+	t.Run("BothNetworks_NoPNID", func(t *testing.T) {
+		// Server with both public and private network, no specific pnID configured
+		instance := newFakeInstances()
+
+		expectedAddresses := []v1.NodeAddress{
+			{Type: v1.NodeHostName, Address: "scw-both-networks"},
+			{Type: v1.NodeExternalIP, Address: "51.159.100.1"},
+			{Type: v1.NodeExternalDNS, Address: "both-networks-server-id.pub.instances.scw.cloud"},
+			{Type: v1.NodeInternalIP, Address: "10.200.0.10"},
+		}
+
+		returnedAddresses, err := instance.NodeAddressesByProviderID(context.TODO(), "scaleway://instance/fr-par-2/both-networks-server-id")
+		AssertNoError(t, err)
+		Equals(t, expectedAddresses, returnedAddresses)
+	})
+
+	t.Run("MultiplePrivateNetworks_NoPNID", func(t *testing.T) {
+		// Server with multiple private networks, no specific pnID configured
+		// Should return IPs from all private networks
+		instance := newFakeInstances()
+
+		expectedAddresses := []v1.NodeAddress{
+			{Type: v1.NodeHostName, Address: "scw-multi-pn"},
+			{Type: v1.NodeInternalIP, Address: "10.200.0.5"},
+			{Type: v1.NodeInternalIP, Address: "192.168.1.5"},
+		}
+
+		returnedAddresses, err := instance.NodeAddressesByProviderID(context.TODO(), "scaleway://instance/fr-par-2/multi-pn-server-id")
+		AssertNoError(t, err)
+		Equals(t, expectedAddresses, returnedAddresses)
+	})
+
+	t.Run("MultiplePrivateNetworks_WithPNID", func(t *testing.T) {
+		// Server with multiple private networks, specific pnID configured
+		// Should only return IPs from the configured private network
+		instance := newFakeInstancesWithPNID("pn-67890")
+
+		expectedAddresses := []v1.NodeAddress{
+			{Type: v1.NodeHostName, Address: "scw-multi-pn"},
+			{Type: v1.NodeInternalIP, Address: "192.168.1.5"},
+		}
+
+		returnedAddresses, err := instance.NodeAddressesByProviderID(context.TODO(), "scaleway://instance/fr-par-2/multi-pn-server-id")
+		AssertNoError(t, err)
+		Equals(t, expectedAddresses, returnedAddresses)
 	})
 }
