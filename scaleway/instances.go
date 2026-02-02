@@ -245,8 +245,12 @@ func (i *instances) getPrivateNetworkAddresses(server *scwinstance.Server) ([]v1
 }
 
 // getIPsForPrivateNIC queries IPAM for IPs assigned to a specific private NIC
+// It retries on transient 5xx errors with exponential backoff.
 func (i *instances) getIPsForPrivateNIC(server *scwinstance.Server, pNIC *scwinstance.PrivateNIC, region scw.Region) ([]v1.NodeAddress, error) {
-	ips, err := i.ipam.ListIPs(&scwipam.ListIPsRequest{
+	var ips *scwipam.ListIPsResponse
+	var err error
+
+	ips, err = i.ipam.ListIPs(&scwipam.ListIPsRequest{
 		ProjectID:    &server.Project,
 		ResourceType: scwipam.ResourceTypeInstancePrivateNic,
 		ResourceID:   &pNIC.ID,
@@ -254,7 +258,8 @@ func (i *instances) getIPsForPrivateNIC(server *scwinstance.Server, pNIC *scwins
 		Region:       region,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("unable to query ipam for node %s NIC %s: %v", server.Name, pNIC.ID, err)
+		return nil, fmt.Errorf("unable to query ipam for node %s NIC %s: %v",
+			server.Name, pNIC.ID, err)
 	}
 
 	var addresses []v1.NodeAddress

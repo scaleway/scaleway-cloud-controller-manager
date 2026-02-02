@@ -19,3 +19,11 @@ func is404Error(err error) bool {
 
 	return false
 }
+
+// isRetryableError returns true if err is a transient server error (5xx)
+func isRetryableError(err error) bool {
+	if responseErr, ok := err.(*scw.ResponseError); ok {
+		return responseErr.StatusCode >= 500 && responseErr.StatusCode < 600
+	}
+	return false
+}
