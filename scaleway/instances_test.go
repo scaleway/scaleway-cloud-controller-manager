@@ -229,6 +229,12 @@ func (f *fakeInstanceAPI) GetServer(req *scwinstance.GetServerRequest, opts ...s
 type fakeIPAMAPI struct {
 	// IPs maps NIC ID to list of IPs
 	IPs map[string][]*scwipam.IP
+	// ErrorToReturn allows tests to inject errors
+	ErrorToReturn error
+	// CallCount tracks how many times ListIPs was called
+	CallCount int
+	// FailUntilAttempt causes errors until this attempt number (1-indexed)
+	FailUntilAttempt int
 }
 
 func newFakeIPAMAPI() *fakeIPAMAPI {
@@ -257,6 +263,13 @@ func newFakeIPAMAPI() *fakeIPAMAPI {
 }
 
 func (f *fakeIPAMAPI) ListIPs(req *scwipam.ListIPsRequest, opts ...scw.RequestOption) (*scwipam.ListIPsResponse, error) {
+	f.CallCount++
+
+	// Return error if configured and we haven't reached the success attempt yet
+	if f.ErrorToReturn != nil && (f.FailUntilAttempt == 0 || f.CallCount <= f.FailUntilAttempt) {
+		return nil, f.ErrorToReturn
+	}
+
 	if req.ResourceID == nil {
 		return &scwipam.ListIPsResponse{IPs: []*scwipam.IP{}}, nil
 	}
