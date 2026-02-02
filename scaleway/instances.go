@@ -178,40 +178,14 @@ func (i *instances) instanceAddresses(server *scwinstance.Server) ([]v1.NodeAddr
 		}
 	}
 
-	var pnNIC *scwinstance.PrivateNIC
-	if i.pnID != "" {
-		for _, pNIC := range server.PrivateNics {
-			if pNIC.PrivateNetworkID == i.pnID {
-				pnNIC = pNIC
-				break
-			}
-		}
+	// Try to get private network IPs
+	privateAddresses, err := i.getPrivateNetworkAddresses(server)
+	if err != nil {
+		klog.Warningf("error getting private network addresses for node %s: %v", server.Name, err)
 	}
 
-	if pnNIC != nil {
-		region, _ := server.Zone.Region()
-		ips, err := i.ipam.ListIPs(&scwipam.ListIPsRequest{
-			ProjectID:    &server.Project,
-			ResourceType: scwipam.ResourceTypeInstancePrivateNic,
-			ResourceID:   &pnNIC.ID,
-			IsIPv6:       scw.BoolPtr(false),
-			Region:       region,
-		})
-		if err != nil {
-			return addresses, fmt.Errorf("unable to query ipam for node %s: %v", server.Name, err)
-		}
-
-		if len(ips.IPs) == 0 {
-			return addresses, fmt.Errorf("no private network ip for node %s", server.Name)
-		}
-
-		for _, nicIP := range ips.IPs {
-			addresses = append(
-				addresses,
-				v1.NodeAddress{Type: v1.NodeInternalIP, Address: nicIP.Address.IP.String()},
-			)
-		}
-
+	if len(privateAddresses) > 0 {
+		addresses = append(addresses, privateAddresses...)
 		return addresses, nil
 	}
 
@@ -221,6 +195,73 @@ func (i *instances) instanceAddresses(server *scwinstance.Server) ([]v1.NodeAddr
 			addresses,
 			v1.NodeAddress{Type: v1.NodeInternalIP, Address: *server.PrivateIP},
 			v1.NodeAddress{Type: v1.NodeInternalDNS, Address: fmt.Sprintf("%s.priv.instances.scw.cloud", server.ID)},
+		)
+	}
+
+	return addresses, nil
+}
+
+// getPrivateNetworkAddresses returns private network IPs for the server.
+// If pnID is configured, it only looks up IPs for that specific private network.
+// If pnID is not configured, it iterates through all private NICs and returns all found IPs.
+func (i *instances) getPrivateNetworkAddresses(server *scwinstance.Server) ([]v1.NodeAddress, error) {
+	if len(server.PrivateNics) == 0 {
+		return nil, nil
+	}
+
+	region, err := server.Zone.Region()
+	if err != nil {
+		return nil, fmt.Errorf("unable to get region from zone %s: %v", server.Zone, err)
+	}
+
+	var addresses []v1.NodeAddress
+
+	// If a specific private network ID is configured, only look for that one
+	if i.pnID != "" {
+		for _, pNIC := range server.PrivateNics {
+			if pNIC.PrivateNetworkID == i.pnID {
+				nicAddresses, err := i.getIPsForPrivateNIC(server, pNIC, region)
+				if err != nil {
+					return nil, err
+				}
+				return nicAddresses, nil
+			}
+		}
+		// Configured pnID not found in server's private NICs
+		return nil, nil
+	}
+
+	// No specific pnID configured - iterate through all private NICs
+	for _, pNIC := range server.PrivateNics {
+		nicAddresses, err := i.getIPsForPrivateNIC(server, pNIC, region)
+		if err != nil {
+			klog.Warningf("error getting IPs for private NIC %s on node %s: %v", pNIC.ID, server.Name, err)
+			continue
+		}
+		addresses = append(addresses, nicAddresses...)
+	}
+
+	return addresses, nil
+}
+
+// getIPsForPrivateNIC queries IPAM for IPs assigned to a specific private NIC
+func (i *instances) getIPsForPrivateNIC(server *scwinstance.Server, pNIC *scwinstance.PrivateNIC, region scw.Region) ([]v1.NodeAddress, error) {
+	ips, err := i.ipam.ListIPs(&scwipam.ListIPsRequest{
+		ProjectID:    &server.Project,
+		ResourceType: scwipam.ResourceTypeInstancePrivateNic,
+		ResourceID:   &pNIC.ID,
+		IsIPv6:       scw.BoolPtr(false),
+		Region:       region,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("unable to query ipam for node %s NIC %s: %v", server.Name, pNIC.ID, err)
+	}
+
+	var addresses []v1.NodeAddress
+	for _, nicIP := range ips.IPs {
+		addresses = append(
+			addresses,
+			v1.NodeAddress{Type: v1.NodeInternalIP, Address: nicIP.Address.IP.String()},
 		)
 	}
 
