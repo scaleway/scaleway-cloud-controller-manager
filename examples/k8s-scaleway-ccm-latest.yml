@@ -32,7 +32,7 @@ spec:
           effect: NoSchedule
       containers:
         - name: scaleway-cloud-controller-manager
-          image: ghcr.io/kommodity-io/scaleway-cloud-controller-manager:v0.36.0-kommodity.3
+          image: ghcr.io/kommodity-io/scaleway-cloud-controller-manager:v0.36.0-kommodity.6
           imagePullPolicy: Always
           args:
             - --cloud-provider=scaleway
