@@ -245,6 +245,43 @@ The possible formats are:
 - `<pn-id>`: will attach a single Private Network to the LB.
 - `<pn-id>,<pn-id>`: will attach the two Private Networks to the LB.
 
+### `service.beta.kubernetes.io/scw-loadbalancer-pn-names`
+
+This is the annotation to configure the Private Networks by name instead of ID.
+The private network names will be resolved to IDs at runtime. This is useful when
+you want to specify private networks without hardcoding their IDs, which can change
+when clusters are recreated.
+
+**Priority order:**
+1. `service.beta.kubernetes.io/scw-loadbalancer-pn-ids` (highest priority)
+2. `service.beta.kubernetes.io/scw-loadbalancer-pn-names`
+3. `PN_ID` environment variable (fallback)
+
+If both `pn-ids` and `pn-names` are set, `pn-ids` takes precedence and `pn-names` is ignored.
+This annotation is ignored when `service.beta.kubernetes.io/scw-loadbalancer-externally-managed` is enabled.
+
+The format must be `<vpc-name>/<pn-name>` to specify both the VPC and the private network name.
+Multiple entries can be comma-separated.
+
+**Examples:**
+```yaml
+# Single private network
+service.beta.kubernetes.io/scw-loadbalancer-pn-names: "default/my-private-network"
+
+# Multiple networks from different VPCs
+service.beta.kubernetes.io/scw-loadbalancer-pn-names: "prod-vpc/network-1,staging-vpc/network-2"
+
+# Multiple networks from the same VPC
+service.beta.kubernetes.io/scw-loadbalancer-pn-names: "default/network-1,default/network-2"
+```
+
+**Error handling:**
+- If the format is invalid (missing VPC or PN name), an error is returned.
+- If a private network name is not found, an error is returned.
+- If multiple private networks have the same name within the VPC, an error is returned.
+- If the specified VPC is not found, an error is returned.
+- If multiple VPCs have the same name, an error is returned.
+
 ### `service.beta.kubernetes.io/scw-loadbalancer-health-check-from-service`
 
 This is the annotation to configure the load balancer backend to use the service's `healthCheckNodePort` for health checks.
