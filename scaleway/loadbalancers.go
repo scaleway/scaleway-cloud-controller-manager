@@ -610,14 +610,15 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 	var targetIPs []string
 	pnIDs := getPrivateNetworkIDs(service)
 	if getForceInternalIP(service) || l.pnID != "" || len(pnIDs) > 0 {
-		targetIPs = extractNodesInternalIps(nodes)
+		// Build list of private network IDs to query (global + service-level)
+		var allPnIDs []string
+		if l.pnID != "" {
+			allPnIDs = append(allPnIDs, l.pnID)
+		}
+		allPnIDs = append(allPnIDs, pnIDs...)
 
-		// Fallback: if no internal IPs and we're in private network mode, try IPAM directly
-		if len(targetIPs) == 0 && (l.pnID != "" || len(pnIDs) > 0) {
-			klog.Warningf("no internal IPs in node status for service %s/%s, attempting IPAM fallback",
-				service.Namespace, service.Name)
-
-			fallbackIPs, fallbackErr := l.getNodeIPsFromIPAM(nodes, loadbalancer.Zone)
+		if len(allPnIDs) > 0 {
+			fallbackIPs, fallbackErr := l.getNodeIPsFromIPAM(nodes, loadbalancer.Zone, allPnIDs)
 			if fallbackErr != nil {
 				klog.Errorf("IPAM fallback failed for service %s/%s: %v", service.Namespace, service.Name, fallbackErr)
 			} else {
@@ -626,8 +627,8 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 		}
 
 		if len(targetIPs) == 0 {
-			klog.Errorf("CRITICAL: no backend IPs found for service %s/%s with pnID %s",
-				service.Namespace, service.Name, l.pnID)
+			klog.Errorf("CRITICAL: no backend IPs found for service %s/%s with pnIDs %v",
+				service.Namespace, service.Name, allPnIDs)
 		}
 
 		klog.V(3).Infof("using internal nodes ips: %s on loadbalancer %s", strings.Join(targetIPs, ","), loadbalancer.ID)
@@ -911,9 +912,10 @@ func (l *loadbalancers) attachPrivateNetworks(loadbalancer *scwlb.LB, service *v
 
 // getNodeIPsFromIPAM queries IPAM directly to get private network IPs for nodes.
 // This is used as a fallback when node.Status.Addresses doesn't contain InternalIPs.
-func (l *loadbalancers) getNodeIPsFromIPAM(nodes []*v1.Node, zone scw.Zone) ([]string, error) {
-	if l.pnID == "" {
-		return nil, fmt.Errorf("cannot query IPAM without private network ID")
+// It accepts a list of private network IDs to query (can include global and/or service-level IDs).
+func (l *loadbalancers) getNodeIPsFromIPAM(nodes []*v1.Node, zone scw.Zone, pnIDs []string) ([]string, error) {
+	if len(pnIDs) == 0 {
+		return nil, fmt.Errorf("cannot query IPAM without private network IDs")
 	}
 
 	region, err := zone.Region()
@@ -923,37 +925,49 @@ func (l *loadbalancers) getNodeIPsFromIPAM(nodes []*v1.Node, zone scw.Zone) ([]s
 
 	var ips []string
 	for _, node := range nodes {
-		if node.Spec.ProviderID == "" {
-			klog.Warningf("node %s has no provider ID, skipping IPAM lookup", node.Name)
-			continue
-		}
+		nodeName := node.Name
 
-		_, _, serverID, err := ServerInfoFromProviderID(node.Spec.ProviderID)
-		if err != nil {
-			klog.Warningf("failed to parse provider ID for node %s: %v", node.Name, err)
-			continue
-		}
+		// Query IPAM for IPs on each private network for this node
+		// Try node name first (used by CAPI/Talos), then fall back to server ID
+		for _, pnID := range pnIDs {
+			// First try with node name as resource name (CAPI/Talos clusters)
+			ipamRes, err := l.ipam.ListIPs(&scwipam.ListIPsRequest{
+				ResourceType:     scwipam.ResourceTypeInstancePrivateNic,
+				IsIPv6:           scw.BoolPtr(false),
+				Region:           region,
+				PrivateNetworkID: &pnID,
+				ResourceName:     &nodeName,
+			})
+			if err != nil {
+				klog.Warningf("IPAM query failed for node %s on pnID %s: %v", nodeName, pnID, err)
+				continue
+			}
 
-		// Query IPAM for IPs on the configured private network for this server
-		ipamRes, err := l.ipam.ListIPs(&scwipam.ListIPsRequest{
-			ResourceType:     scwipam.ResourceTypeInstancePrivateNic,
-			IsIPv6:           scw.BoolPtr(false),
-			Region:           region,
-			PrivateNetworkID: &l.pnID,
-			ResourceName:     &serverID,
-		})
-		if err != nil {
-			klog.Warningf("IPAM query failed for node %s (server %s): %v", node.Name, serverID, err)
-			continue
-		}
+			// If node name didn't work, try server ID from provider ID
+			if len(ipamRes.IPs) == 0 && node.Spec.ProviderID != "" {
+				_, _, serverID, err := ServerInfoFromProviderID(node.Spec.ProviderID)
+				if err == nil {
+					ipamRes, err = l.ipam.ListIPs(&scwipam.ListIPsRequest{
+						ResourceType:     scwipam.ResourceTypeInstancePrivateNic,
+						IsIPv6:           scw.BoolPtr(false),
+						Region:           region,
+						PrivateNetworkID: &pnID,
+						ResourceName:     &serverID,
+					})
+					if err != nil {
+						klog.Warningf("IPAM query (server ID fallback) failed for node %s on pnID %s: %v", nodeName, pnID, err)
+					}
+				}
+			}
 
-		for _, ip := range ipamRes.IPs {
-			ips = append(ips, ip.Address.IP.String())
+			for _, ip := range ipamRes.IPs {
+				ips = append(ips, ip.Address.IP.String())
+			}
 		}
 	}
 
 	if len(ips) == 0 {
-		return nil, fmt.Errorf("no IPs found via IPAM for any nodes")
+		return nil, fmt.Errorf("no IPs found via IPAM for any nodes on pnIDs %v", pnIDs)
 	}
 
 	klog.V(3).Infof("IPAM fallback found %d IPs: %v", len(ips), ips)
