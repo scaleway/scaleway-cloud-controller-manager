@@ -32,6 +32,7 @@ import (
 	"k8s.io/klog/v2"
 	"k8s.io/utils/ptr"
 
+	scwinstance "github.com/scaleway/scaleway-sdk-go/api/instance/v1"
 	scwipam "github.com/scaleway/scaleway-sdk-go/api/ipam/v1"
 	scwlb "github.com/scaleway/scaleway-sdk-go/api/lb/v1"
 	scwvpc "github.com/scaleway/scaleway-sdk-go/api/vpc/v2"
@@ -42,6 +43,7 @@ const MaxEntriesPerACL = 60
 
 type loadbalancers struct {
 	api           LoadBalancerAPI
+	instance      LBInstanceAPI
 	ipam          IPAMAPI
 	vpc           VPCAPI
 	client        *client // for patcher
@@ -49,8 +51,14 @@ type loadbalancers struct {
 	pnID          string
 }
 
+type LBInstanceAPI interface {
+	GetServer(req *scwinstance.GetServerRequest, opts ...scw.RequestOption) (*scwinstance.GetServerResponse, error)
+}
+
 type VPCAPI interface {
 	GetPrivateNetwork(req *scwvpc.GetPrivateNetworkRequest, opts ...scw.RequestOption) (*scwvpc.PrivateNetwork, error)
+	ListPrivateNetworks(req *scwvpc.ListPrivateNetworksRequest, opts ...scw.RequestOption) (*scwvpc.ListPrivateNetworksResponse, error)
+	ListVPCs(req *scwvpc.ListVPCsRequest, opts ...scw.RequestOption) (*scwvpc.ListVPCsResponse, error)
 }
 
 type LoadBalancerAPI interface {
@@ -88,6 +96,7 @@ func newLoadbalancers(client *client, defaultLBType, pnID string) *loadbalancers
 	}
 	return &loadbalancers{
 		api:           scwlb.NewZonedAPI(client.scaleway),
+		instance:      scwinstance.NewAPI(client.scaleway),
 		ipam:          scwipam.NewAPI(client.scaleway),
 		vpc:           scwvpc.NewAPI(client.scaleway),
 		client:        client,
@@ -154,7 +163,7 @@ func (l *loadbalancers) EnsureLoadBalancer(ctx context.Context, clusterName stri
 		return nil, fmt.Errorf("invalid value for annotation %s: expected boolean", serviceAnnotationLoadBalancerPrivate)
 	}
 
-	if lbPrivate && l.pnID == "" {
+	if lbPrivate && l.pnID == "" && len(getPrivateNetworkIDs(service)) == 0 && len(getPrivateNetworkNames(service)) == 0 {
 		return nil, fmt.Errorf("scaleway-cloud-controller-manager cannot create private load balancers without a private network")
 	}
 
@@ -603,12 +612,33 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 		return err
 	}
 
-	if err := l.attachPrivateNetworks(loadbalancer, service, lbExternallyManaged); err != nil {
+	// Get region for PN operations
+	region, err := loadbalancer.Zone.Region()
+	if err != nil {
+		return fmt.Errorf("unable to get region from zone %s: %v", loadbalancer.Zone, err)
+	}
+
+	// Discover the project ID from the cluster nodes for accurate VPC/PN lookup
+	nodeProjectID, err := l.getProjectIDFromNodes(nodes, region)
+	if err != nil {
+		klog.V(3).Infof("could not determine project ID from nodes: %v, falling back to default", err)
+	}
+
+	configuredPNIDs, err := l.attachPrivateNetworks(loadbalancer, service, lbExternallyManaged, region, nodeProjectID)
+	if err != nil {
 		return fmt.Errorf("failed to attach private networks: %w", err)
 	}
 
 	var targetIPs []string
-	if getForceInternalIP(service) || l.pnID != "" || len(getPrivateNetworkIDs(service)) > 0 {
+	if len(configuredPNIDs) > 0 {
+		// Use precise IPAM-based lookup to find node IPs on the configured private networks
+		targetIPs, err = l.getNodeIPsForPrivateNetworks(nodes, configuredPNIDs, region)
+		if err != nil {
+			klog.Warningf("failed to get node IPs for private networks, falling back to internal IPs: %v", err)
+			targetIPs = extractNodesInternalIps(nodes)
+		}
+		klog.V(3).Infof("using private network nodes ips: %s on loadbalancer %s", strings.Join(targetIPs, ","), loadbalancer.ID)
+	} else if getForceInternalIP(service) {
 		targetIPs = extractNodesInternalIps(nodes)
 		klog.V(3).Infof("using internal nodes ips: %s on loadbalancer %s", strings.Join(targetIPs, ","), loadbalancer.ID)
 	} else {
@@ -821,23 +851,44 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 	return nil
 }
 
-func (l *loadbalancers) attachPrivateNetworks(loadbalancer *scwlb.LB, service *v1.Service, lbExternallyManaged bool) error {
-	if l.pnID == "" {
-		return nil
-	}
-
+// attachPrivateNetworks attaches the specified private networks to the load balancer.
+// It returns the list of private network IDs that were configured (for use in node IP lookup).
+// The projectID parameter is used to scope VPC/PN lookups to the correct project (derived from cluster nodes).
+func (l *loadbalancers) attachPrivateNetworks(loadbalancer *scwlb.LB, service *v1.Service, lbExternallyManaged bool, region scw.Region, projectID string) ([]string, error) {
 	// maps pnID => attached
 	pnIDs := make(map[string]bool)
 
 	// Fetch user-specified PrivateNetworkIDs unless LB is externally managed.
 	if !lbExternallyManaged {
-		for _, pnID := range getPrivateNetworkIDs(service) {
-			pnIDs[pnID] = false
+		// Priority 1: Explicit IDs annotation
+		explicitIDs := getPrivateNetworkIDs(service)
+		if len(explicitIDs) > 0 {
+			for _, pnID := range explicitIDs {
+				pnIDs[pnID] = false
+			}
+		} else {
+			// Priority 2: Names annotation - resolve to IDs
+			pnNames := getPrivateNetworkNames(service)
+			if len(pnNames) > 0 {
+				resolvedIDs, err := l.resolvePrivateNetworkNames(pnNames, region, projectID)
+				if err != nil {
+					return nil, err
+				}
+				for _, pnID := range resolvedIDs {
+					pnIDs[pnID] = false
+				}
+			}
 		}
 	}
 
-	if len(pnIDs) == 0 {
+	// Priority 3: Environment variable PN_ID (existing fallback)
+	if len(pnIDs) == 0 && l.pnID != "" {
 		pnIDs[l.pnID] = false
+	}
+
+	// Nothing to do if no private networks are configured
+	if len(pnIDs) == 0 {
+		return nil, nil
 	}
 
 	respPN, err := l.api.ListLBPrivateNetworks(&scwlb.ZonedAPIListLBPrivateNetworksRequest{
@@ -845,7 +896,7 @@ func (l *loadbalancers) attachPrivateNetworks(loadbalancer *scwlb.LB, service *v
 		LBID: loadbalancer.ID,
 	})
 	if err != nil {
-		return fmt.Errorf("error listing private networks of load balancer %s: %v", loadbalancer.ID, err)
+		return nil, fmt.Errorf("error listing private networks of load balancer %s: %v", loadbalancer.ID, err)
 	}
 
 	for _, pNIC := range respPN.PrivateNetwork {
@@ -864,7 +915,7 @@ func (l *loadbalancers) attachPrivateNetworks(loadbalancer *scwlb.LB, service *v
 				PrivateNetworkID: pNIC.PrivateNetworkID,
 			})
 			if err != nil {
-				return fmt.Errorf("unable to detach unmatched private network %s from %s: %v", pNIC.PrivateNetworkID, loadbalancer.ID, err)
+				return nil, fmt.Errorf("unable to detach unmatched private network %s from %s: %v", pNIC.PrivateNetworkID, loadbalancer.ID, err)
 			}
 		}
 	}
@@ -882,11 +933,260 @@ func (l *loadbalancers) attachPrivateNetworks(loadbalancer *scwlb.LB, service *v
 			DHCPConfig:       &scwlb.PrivateNetworkDHCPConfig{},
 		})
 		if err != nil {
-			return fmt.Errorf("unable to attach private network %s on %s: %v", pnID, loadbalancer.ID, err)
+			return nil, fmt.Errorf("unable to attach private network %s on %s: %v", pnID, loadbalancer.ID, err)
 		}
 	}
 
-	return nil
+	// Return the list of configured PN IDs
+	result := make([]string, 0, len(pnIDs))
+	for pnID := range pnIDs {
+		result = append(result, pnID)
+	}
+	return result, nil
+}
+
+// getVPCByName looks up a VPC by name in the specified region.
+// The projectID parameter scopes the lookup to a specific project (derived from cluster nodes).
+// Returns an error if no VPC is found or if multiple VPCs have the same name.
+func (l *loadbalancers) getVPCByName(name string, region scw.Region, projectID string) (*scwvpc.VPC, error) {
+	req := &scwvpc.ListVPCsRequest{
+		Region: region,
+		Name:   &name,
+	}
+
+	// Scope to the provided project ID to avoid cross-project conflicts
+	if projectID != "" {
+		req.ProjectID = &projectID
+	}
+
+	resp, err := l.vpc.ListVPCs(req, scw.WithAllPages())
+	if err != nil {
+		return nil, fmt.Errorf("error listing VPCs: %v", err)
+	}
+
+	var found *scwvpc.VPC
+	for _, vpc := range resp.Vpcs {
+		if vpc.Name == name { // Exact match required (API filter is fuzzy)
+			if found != nil {
+				return nil, VPCDuplicated
+			}
+			found = vpc
+		}
+	}
+
+	if found == nil {
+		return nil, VPCNotFound
+	}
+	return found, nil
+}
+
+// getPrivateNetworkByName looks up a private network by name in the specified region.
+// The name must be in the format "vpc-name/pn-name" to avoid ambiguity.
+// The projectID parameter scopes the VPC lookup to a specific project (derived from cluster nodes).
+// Returns an error if the format is invalid, no network is found, or if multiple networks have the same name.
+func (l *loadbalancers) getPrivateNetworkByName(name string, region scw.Region, projectID string) (*scwvpc.PrivateNetwork, error) {
+	// Require vpc-name/pn-name format
+	parts := strings.SplitN(name, "/", 2)
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("invalid private network name format %q: must be in 'vpc-name/pn-name' format", name)
+	}
+
+	vpcName := strings.TrimSpace(parts[0])
+	pnName := strings.TrimSpace(parts[1])
+
+	if vpcName == "" || pnName == "" {
+		return nil, fmt.Errorf("invalid private network name format %q: both vpc-name and pn-name are required", name)
+	}
+
+	vpc, err := l.getVPCByName(vpcName, region, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve VPC %q: %w", vpcName, err)
+	}
+
+	req := &scwvpc.ListPrivateNetworksRequest{
+		Region: region,
+		Name:   &pnName,
+		VpcID:  &vpc.ID,
+	}
+
+	resp, err := l.vpc.ListPrivateNetworks(req, scw.WithAllPages())
+	if err != nil {
+		return nil, fmt.Errorf("error listing private networks: %v", err)
+	}
+
+	var found *scwvpc.PrivateNetwork
+	for _, pn := range resp.PrivateNetworks {
+		if pn.Name == pnName { // Exact match required (API filter is fuzzy)
+			if found != nil {
+				return nil, PrivateNetworkDuplicated
+			}
+			found = pn
+		}
+	}
+
+	if found == nil {
+		return nil, PrivateNetworkNotFound
+	}
+	return found, nil
+}
+
+// resolvePrivateNetworkNames converts private network names to IDs.
+// The projectID parameter scopes VPC lookups to a specific project (derived from cluster nodes).
+func (l *loadbalancers) resolvePrivateNetworkNames(names []string, region scw.Region, projectID string) ([]string, error) {
+	ids := make([]string, 0, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		pn, err := l.getPrivateNetworkByName(name, region, projectID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve private network name %q: %w", name, err)
+		}
+		ids = append(ids, pn.ID)
+	}
+	return ids, nil
+}
+
+// getNodeIPsForPrivateNetworks returns the private network IPs for nodes that are connected
+// to any of the specified private networks. This queries the Scaleway Instance API for each
+// node to find which private NICs are connected to the target PNs, then queries IPAM for their IPs.
+func (l *loadbalancers) getNodeIPsForPrivateNetworks(nodes []*v1.Node, pnIDs []string, region scw.Region) ([]string, error) {
+	if len(nodes) == 0 || len(pnIDs) == 0 {
+		return nil, nil
+	}
+
+	// Create a set of target PN IDs for fast lookup
+	targetPNs := make(map[string]bool)
+	for _, pnID := range pnIDs {
+		targetPNs[pnID] = true
+	}
+
+	var ips []string
+	for _, node := range nodes {
+		// Extract instance info from provider ID (format: scaleway://instance/<zone>/<instance-id>)
+		providerID := node.Spec.ProviderID
+		if providerID == "" {
+			klog.V(4).Infof("skipping node %s: no provider ID", node.Name)
+			continue
+		}
+
+		product, zoneStr, instanceID, err := ServerInfoFromProviderID(providerID)
+		if err != nil {
+			klog.V(4).Infof("skipping node %s: failed to parse provider ID %q: %v", node.Name, providerID, err)
+			continue
+		}
+
+		// Skip non-instance nodes (e.g., baremetal)
+		if product != InstanceTypeInstance {
+			klog.V(4).Infof("skipping node %s: not an instance (product=%s)", node.Name, product)
+			continue
+		}
+
+		zone := scw.Zone(zoneStr)
+
+		// Get server details from Instance API
+		serverResp, err := l.instance.GetServer(&scwinstance.GetServerRequest{
+			Zone:     zone,
+			ServerID: instanceID,
+		})
+		if err != nil {
+			klog.Warningf("failed to get server %s for node %s: %v", instanceID, node.Name, err)
+			continue
+		}
+
+		server := serverResp.Server
+		if server == nil || len(server.PrivateNics) == 0 {
+			klog.V(4).Infof("node %s has no private NICs", node.Name)
+			continue
+		}
+
+		// Find NICs connected to our target private networks
+		for _, nic := range server.PrivateNics {
+			if !targetPNs[nic.PrivateNetworkID] {
+				continue
+			}
+
+			// Query IPAM for this NIC's IP addresses
+			ipResp, err := l.ipam.ListIPs(&scwipam.ListIPsRequest{
+				Region:       region,
+				ResourceType: scwipam.ResourceTypeInstancePrivateNic,
+				ResourceID:   &nic.ID,
+				IsIPv6:       scw.BoolPtr(false),
+			})
+			if err != nil {
+				klog.Warningf("failed to get IPs for NIC %s on node %s: %v", nic.ID, node.Name, err)
+				continue
+			}
+
+			for _, ip := range ipResp.IPs {
+				ipAddr := ip.Address.IP.String()
+				klog.V(4).Infof("found IP %s for node %s on PN %s", ipAddr, node.Name, nic.PrivateNetworkID)
+				ips = append(ips, ipAddr)
+			}
+		}
+	}
+
+	if len(ips) == 0 {
+		return nil, fmt.Errorf("no node IPs found for configured private networks %v", pnIDs)
+	}
+
+	return ips, nil
+}
+
+// getProjectIDFromNodes extracts the project ID from cluster nodes by querying the Instance API.
+// This ensures VPC/PN lookups are scoped to the correct project where the nodes actually run,
+// rather than relying on environment variables that may point to a different project.
+// Returns the project ID if all nodes belong to the same project, or an error if nodes
+// are in different projects or if the project ID cannot be determined.
+func (l *loadbalancers) getProjectIDFromNodes(nodes []*v1.Node, region scw.Region) (string, error) {
+	if len(nodes) == 0 {
+		return "", fmt.Errorf("no nodes provided")
+	}
+
+	var projectID string
+	for _, node := range nodes {
+		providerID := node.Spec.ProviderID
+		if providerID == "" {
+			continue
+		}
+
+		product, zoneStr, instanceID, err := ServerInfoFromProviderID(providerID)
+		if err != nil {
+			klog.V(4).Infof("skipping node %s: failed to parse provider ID %q: %v", node.Name, providerID, err)
+			continue
+		}
+
+		// Skip non-instance nodes (e.g., baremetal)
+		if product != InstanceTypeInstance {
+			continue
+		}
+
+		zone := scw.Zone(zoneStr)
+
+		// Get server details from Instance API
+		serverResp, err := l.instance.GetServer(&scwinstance.GetServerRequest{
+			Zone:     zone,
+			ServerID: instanceID,
+		})
+		if err != nil {
+			klog.V(4).Infof("failed to get server %s for node %s: %v", instanceID, node.Name, err)
+			continue
+		}
+
+		nodeProject := serverResp.Server.Project
+		if projectID == "" {
+			projectID = nodeProject
+		} else if projectID != nodeProject {
+			return "", fmt.Errorf("nodes belong to different projects: %s and %s", projectID, nodeProject)
+		}
+	}
+
+	if projectID == "" {
+		return "", fmt.Errorf("could not determine project ID from any node")
+	}
+
+	return projectID, nil
 }
 
 // createPrivateServiceStatus creates a LoadBalancer status for services with private load balancers

@@ -242,6 +242,15 @@ const (
 	//	- "<pn-id>,<pn-id>": will attach the two Private Networks to the LB.
 	serviceAnnotationPrivateNetworkIDs = "service.beta.kubernetes.io/scw-loadbalancer-pn-ids"
 
+	// serviceAnnotationPrivateNetworkNames is the annotation to configure the Private Networks
+	// by name instead of ID. The private network names will be resolved to IDs.
+	// If both pn-ids and pn-names are set, pn-ids takes precedence.
+	// This annotation is ignored when service.beta.kubernetes.io/scw-loadbalancer-externally-managed is enabled.
+	//
+	// The format must be "<vpc-name>/<pn-name>" to specify both the VPC and the private network.
+	// Multiple entries can be comma-separated: "<vpc-name>/<pn-name>,<vpc-name>/<pn-name>".
+	serviceAnnotationPrivateNetworkNames = "service.beta.kubernetes.io/scw-loadbalancer-pn-names"
+
 	// serviceAnnotationLoadBalancerHealthCheckFromService is the annotation to use healthCheckNodePort from the service
 	// The possible values are "false", "true" or "*" for all ports or a comma delimited list of the service port
 	// (for instance "80,443"). When enabled for a port, the health check will use the service's healthCheckNodePort
@@ -325,6 +334,15 @@ func getPrivateNetworkIDs(service *v1.Service) []string {
 	}
 
 	return strings.Split(pnIDs, ",")
+}
+
+func getPrivateNetworkNames(service *v1.Service) []string {
+	pnNames := service.Annotations[serviceAnnotationPrivateNetworkNames]
+	if pnNames == "" {
+		return nil
+	}
+
+	return strings.Split(pnNames, ",")
 }
 
 func getSendProxyV2(service *v1.Service, nodePort int32) (scwlb.ProxyProtocol, error) {
