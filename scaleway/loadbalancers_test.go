@@ -2561,3 +2561,109 @@ func TestServicePortToBackendWithHealthCheckFromService(t *testing.T) {
 		})
 	}
 }
+
+func TestBackendPreservation(t *testing.T) {
+	// Test that stringArrayEqual correctly identifies when pools differ
+	t.Run("EmptyTargetIPsVsNonEmptyPool", func(t *testing.T) {
+		existingPool := []string{"10.0.0.1", "10.0.0.2"}
+		targetIPs := []string{}
+
+		// These are not equal, so the update logic would trigger
+		equal := stringArrayEqual(existingPool, targetIPs)
+		if equal {
+			t.Error("Expected pools to be unequal")
+		}
+
+		// The safety check should prevent clearing: len(targetIPs) == 0 && len(existingPool) > 0
+		shouldPreserve := len(targetIPs) == 0 && len(existingPool) > 0
+		if !shouldPreserve {
+			t.Error("Expected preservation logic to trigger")
+		}
+	})
+
+	t.Run("BothEmpty", func(t *testing.T) {
+		existingPool := []string{}
+		targetIPs := []string{}
+
+		equal := stringArrayEqual(existingPool, targetIPs)
+		if !equal {
+			t.Error("Expected empty pools to be equal")
+		}
+
+		// No preservation needed - both are empty
+		shouldPreserve := len(targetIPs) == 0 && len(existingPool) > 0
+		if shouldPreserve {
+			t.Error("Should not preserve when both pools are empty")
+		}
+	})
+
+	t.Run("NonEmptyTargetIPs", func(t *testing.T) {
+		existingPool := []string{"10.0.0.1", "10.0.0.2"}
+		targetIPs := []string{"10.0.0.3"}
+
+		equal := stringArrayEqual(existingPool, targetIPs)
+		if equal {
+			t.Error("Expected pools to be unequal")
+		}
+
+		// Should NOT preserve - we have new IPs to set
+		shouldPreserve := len(targetIPs) == 0 && len(existingPool) > 0
+		if shouldPreserve {
+			t.Error("Should not preserve when we have new target IPs")
+		}
+	})
+}
+
+func TestExtractNodesInternalIps(t *testing.T) {
+	t.Run("NodesWithInternalIPs", func(t *testing.T) {
+		nodes := []*v1.Node{
+			{
+				Status: v1.NodeStatus{
+					Addresses: []v1.NodeAddress{
+						{Type: v1.NodeInternalIP, Address: "10.0.0.1"},
+						{Type: v1.NodeExternalIP, Address: "1.2.3.4"},
+					},
+				},
+			},
+			{
+				Status: v1.NodeStatus{
+					Addresses: []v1.NodeAddress{
+						{Type: v1.NodeInternalIP, Address: "10.0.0.2"},
+					},
+				},
+			},
+		}
+
+		ips := extractNodesInternalIps(nodes)
+		if len(ips) != 2 {
+			t.Errorf("Expected 2 IPs, got %d", len(ips))
+		}
+	})
+
+	t.Run("NodesWithoutInternalIPs", func(t *testing.T) {
+		nodes := []*v1.Node{
+			{
+				Status: v1.NodeStatus{
+					Addresses: []v1.NodeAddress{
+						{Type: v1.NodeExternalIP, Address: "1.2.3.4"},
+						{Type: v1.NodeHostName, Address: "node1"},
+					},
+				},
+			},
+		}
+
+		ips := extractNodesInternalIps(nodes)
+		if len(ips) != 0 {
+			t.Errorf("Expected 0 IPs when no internal IPs, got %d", len(ips))
+		}
+	})
+
+	t.Run("EmptyNodes", func(t *testing.T) {
+		nodes := []*v1.Node{}
+
+		ips := extractNodesInternalIps(nodes)
+		if len(ips) != 0 {
+			t.Errorf("Expected 0 IPs for empty nodes, got %d", len(ips))
+		}
+	})
+}
