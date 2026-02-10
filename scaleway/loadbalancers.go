@@ -956,6 +956,7 @@ func (l *loadbalancers) getNodeIPsFromIPAM(nodes []*v1.Node, zone scw.Zone, pnID
 					})
 					if err != nil {
 						klog.Warningf("IPAM query (server ID fallback) failed for node %s on pnID %s: %v", nodeName, pnID, err)
+						continue
 					}
 				}
 			}
