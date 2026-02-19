@@ -44,6 +44,7 @@ const (
 	extraUserAgentEnv = "EXTRA_USER_AGENT"
 	// disableInterfacesEnv is the environment variable used to disable some cloud interfaces
 	disableInterfacesEnv      = "DISABLE_INTERFACES"
+	disableTagsSyncEnv        = "DISABLE_TAGS_SYNC"
 	instancesInterfaceName    = "instances"
 	loadBalancerInterfaceName = "loadbalancer"
 	zonesInterfaceName        = "zones"
@@ -129,9 +130,10 @@ func (c *cloud) Initialize(clientBuilder cloudprovider.ControllerClientBuilder, 
 
 	klog.Infof("clientset initialized")
 
-	c.syncController = newSyncController(c.client, c.client.kubernetes, cacheUpdateFrequency)
-
-	go c.syncController.Run(stop)
+	if os.Getenv(disableTagsSyncEnv) == "" {
+		c.syncController = newSyncController(c.client, c.client.kubernetes, cacheUpdateFrequency)
+		go c.syncController.Run(stop)
+	}
 }
 
 func (c *cloud) LoadBalancer() (cloudprovider.LoadBalancer, bool) {
