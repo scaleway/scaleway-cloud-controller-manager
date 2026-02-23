@@ -702,6 +702,13 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 
 		// Update backend servers
 		if !stringArrayEqual(backend.Pool, targetIPs) {
+			// Safety: refuse to clear existing backends when no replacement IPs are found
+			if len(targetIPs) == 0 && len(backend.Pool) > 0 {
+				klog.Warningf("refusing to clear backend pool for backend %s on loadbalancer %s — keeping %d existing servers",
+					backend.ID, loadbalancer.ID, len(backend.Pool))
+				continue
+			}
+
 			klog.V(3).Infof("update server list for backend: %s port: %d loadbalancer: %s", backend.ID, port.NodePort, loadbalancer.ID)
 			if _, err := l.api.SetBackendServers(&scwlb.ZonedAPISetBackendServersRequest{
 				Zone:      loadbalancer.Zone,
