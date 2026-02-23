@@ -181,7 +181,8 @@ func (i *instances) instanceAddresses(server *scwinstance.Server) ([]v1.NodeAddr
 	// Try to get private network IPs
 	privateAddresses, err := i.getPrivateNetworkAddresses(server)
 	if err != nil {
-		klog.Warningf("error getting private network addresses for node %s: %v", server.Name, err)
+		klog.Warningf("failed to get private network addresses for node %s: %v", server.Name, err)
+		return nil, fmt.Errorf("failed to get private network addresses for node %s: %w", server.Name, err)
 	}
 
 	if len(privateAddresses) > 0 {
@@ -235,8 +236,8 @@ func (i *instances) getPrivateNetworkAddresses(server *scwinstance.Server) ([]v1
 	for _, pNIC := range server.PrivateNics {
 		nicAddresses, err := i.getIPsForPrivateNIC(server, pNIC, region)
 		if err != nil {
-			klog.Warningf("error getting IPs for private NIC %s on node %s: %v", pNIC.ID, server.Name, err)
-			continue
+			klog.Warningf("failed to query IPAM for node %s: %v", server.Name, err)
+			return addresses, fmt.Errorf("failed to query IPAM for node %s: %w", server.Name, err)
 		}
 		addresses = append(addresses, nicAddresses...)
 	}
