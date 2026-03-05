@@ -599,7 +599,9 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 	}
 
 	nodes = filterNodes(service, nodes)
-	if err := nodesInitialized(nodes); err != nil {
+	useInternalIPs := getForceInternalIP(service) || l.pnID != "" || len(getPrivateNetworkIDs(service)) > 0
+
+	if err := nodesInitialized(nodes, useInternalIPs); err != nil {
 		return err
 	}
 
@@ -608,7 +610,7 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 	}
 
 	var targetIPs []string
-	if getForceInternalIP(service) || l.pnID != "" || len(getPrivateNetworkIDs(service)) > 0 {
+	if useInternalIPs {
 		targetIPs = extractNodesInternalIps(nodes)
 		klog.V(3).Infof("using internal nodes ips: %s on loadbalancer %s", strings.Join(targetIPs, ","), loadbalancer.ID)
 	} else {
@@ -700,13 +702,6 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 
 		// Update backend servers
 		if !stringArrayEqual(backend.Pool, targetIPs) {
-			// Safety: refuse to clear existing backends when no replacement IPs are found
-			if len(targetIPs) == 0 && len(backend.Pool) > 0 {
-				klog.Warningf("refusing to clear backend pool for backend %s on loadbalancer %s — keeping %d existing servers",
-					backend.ID, loadbalancer.ID, len(backend.Pool))
-				continue
-			}
-
 			klog.V(3).Infof("update server list for backend: %s port: %d loadbalancer: %s", backend.ID, port.NodePort, loadbalancer.ID)
 			if _, err := l.api.SetBackendServers(&scwlb.ZonedAPISetBackendServersRequest{
 				Zone:      loadbalancer.Zone,
@@ -1968,7 +1963,7 @@ func hasEqualLoadBalancerStaticIPs(service *v1.Service, lb *scwlb.LB) bool {
 }
 
 // nodesInitialized verifies that all nodes are initialized before using them as LoadBalancer targets.
-func nodesInitialized(nodes []*v1.Node) error {
+func nodesInitialized(nodes []*v1.Node, useInternalIPs bool) error {
 	for _, node := range nodes {
 		// If node was created more than 3 minutes ago, we ignore it to
 		// avoid blocking callers indefinitely.
@@ -1980,6 +1975,18 @@ func nodesInitialized(nodes []*v1.Node) error {
 			return taint.Key == api.TaintExternalCloudProvider
 		}) {
 			return fmt.Errorf("node %s is not yet initialized", node.Name)
+		}
+
+		// Because the CCM populates the node addresses AFTER removing the taint,
+		// we also check that the node has the expected IPs before considering it as initialized.
+		if useInternalIPs {
+			if len(extractNodesInternalIps([]*v1.Node{node})) == 0 {
+				return fmt.Errorf("node %s is initialized, but is missing an internal IP address", node.Name)
+			}
+		} else {
+			if len(extractNodesExternalIps([]*v1.Node{node})) == 0 {
+				return fmt.Errorf("node %s is initialized, but is missing an external IP address", node.Name)
+			}
 		}
 	}
 
