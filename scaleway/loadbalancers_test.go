@@ -1773,7 +1773,8 @@ func Test_hasEqualLoadBalancerStaticIPs(t *testing.T) {
 
 func Test_nodesInitialized(t *testing.T) {
 	type args struct {
-		nodes []*v1.Node
+		nodes          []*v1.Node
+		useInternalIPs bool
 	}
 	tests := []struct {
 		name    string
@@ -1781,15 +1782,43 @@ func Test_nodesInitialized(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "node initialized",
+			name: "node initialized with external IP",
 			args: args{
 				nodes: []*v1.Node{
 					{
 						ObjectMeta: metav1.ObjectMeta{
-							Name: "test",
+							Name:              "test",
+							CreationTimestamp: metav1.NewTime(time.Now().Add(-10 * time.Second)),
+						},
+						Status: v1.NodeStatus{
+							Addresses: []v1.NodeAddress{{
+								Type:    v1.NodeExternalIP,
+								Address: "12.34.56.78",
+							}},
 						},
 					},
 				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "node initialized with internal IP",
+			args: args{
+				nodes: []*v1.Node{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:              "test",
+							CreationTimestamp: metav1.NewTime(time.Now().Add(-10 * time.Second)),
+						},
+						Status: v1.NodeStatus{
+							Addresses: []v1.NodeAddress{{
+								Type:    v1.NodeInternalIP,
+								Address: "10.0.0.1",
+							}},
+						},
+					},
+				},
+				useInternalIPs: true,
 			},
 			wantErr: false,
 		},
@@ -1839,10 +1868,27 @@ func Test_nodesInitialized(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "node initialized but missing external IP",
+			args: args{
+				nodes: []*v1.Node{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:              "test",
+							CreationTimestamp: metav1.NewTime(time.Now().Add(-10 * time.Second)),
+						},
+						Status: v1.NodeStatus{
+							Addresses: []v1.NodeAddress{},
+						},
+					},
+				},
+			},
+			wantErr: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if err := nodesInitialized(tt.args.nodes); (err != nil) != tt.wantErr {
+			if err := nodesInitialized(tt.args.nodes, tt.args.useInternalIPs); (err != nil) != tt.wantErr {
 				t.Errorf("nodesInitialized() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
