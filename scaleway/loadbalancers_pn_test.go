@@ -27,6 +27,107 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+func TestLBPNNameSelectorGate(t *testing.T) {
+	vpcAPI := &fakeVPCAPI{
+		vpcs: []*scwvpc.VPC{
+			{ID: "vpc-default", Name: "default", Region: scw.RegionFrPar, ProjectID: "proj-1"},
+		},
+		privateNetworks: []*scwvpc.PrivateNetwork{
+			{ID: "pn-resolved-1", Name: "my-cluster", VpcID: "vpc-default"},
+		},
+	}
+
+	testLB := &scwlb.LB{
+		ID:   "lb-1",
+		Zone: scw.ZoneFrPar2,
+	}
+
+	t.Run("pn-names ignored when gate is disabled", func(t *testing.T) {
+		// Do NOT set SCW_ENABLE_LB_PN_NAME_SELECTOR (gate off by default)
+		t.Setenv(enableLBPNNameSelectorEnv, "")
+
+		lbAPI := &fakeLBAPI{}
+		lb := newTestLB(lbAPI, vpcAPI, "pn-from-env")
+
+		service := &v1.Service{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					"service.beta.kubernetes.io/scw-loadbalancer-pn-names": "default/my-cluster",
+				},
+			},
+		}
+
+		gotIDs, err := lb.attachPrivateNetworks(testLB, service, false, scw.RegionFrPar, "proj-1")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// pn-names should be ignored; should fall back to env var PN_ID
+		if len(gotIDs) != 1 || gotIDs[0] != "pn-from-env" {
+			t.Errorf("expected fallback to env var PN_ID [pn-from-env], got %v", gotIDs)
+		}
+		if len(lbAPI.attachCalls) != 1 || lbAPI.attachCalls[0] != "pn-from-env" {
+			t.Errorf("expected attach call for pn-from-env, got %v", lbAPI.attachCalls)
+		}
+	})
+
+	t.Run("pn-names used when gate is enabled", func(t *testing.T) {
+		t.Setenv(enableLBPNNameSelectorEnv, "true")
+
+		lbAPI := &fakeLBAPI{}
+		lb := newTestLB(lbAPI, vpcAPI, "pn-from-env")
+
+		service := &v1.Service{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					"service.beta.kubernetes.io/scw-loadbalancer-pn-names": "default/my-cluster",
+				},
+			},
+		}
+
+		gotIDs, err := lb.attachPrivateNetworks(testLB, service, false, scw.RegionFrPar, "proj-1")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// pn-names should resolve, taking precedence over env var
+		if len(gotIDs) != 1 || gotIDs[0] != "pn-resolved-1" {
+			t.Errorf("expected resolved PN [pn-resolved-1], got %v", gotIDs)
+		}
+		if len(lbAPI.attachCalls) != 1 || lbAPI.attachCalls[0] != "pn-resolved-1" {
+			t.Errorf("expected attach call for pn-resolved-1, got %v", lbAPI.attachCalls)
+		}
+	})
+
+	t.Run("pn-names only with no env var returns nil when gate disabled", func(t *testing.T) {
+		t.Setenv(enableLBPNNameSelectorEnv, "")
+
+		lbAPI := &fakeLBAPI{}
+		lb := newTestLB(lbAPI, vpcAPI, "") // no env var PN_ID
+
+		service := &v1.Service{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					"service.beta.kubernetes.io/scw-loadbalancer-pn-names": "default/my-cluster",
+				},
+			},
+		}
+
+		gotIDs, err := lb.attachPrivateNetworks(testLB, service, false, scw.RegionFrPar, "proj-1")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// pn-names ignored + no env var = no PNs configured
+		if gotIDs != nil {
+			t.Errorf("expected nil configured IDs when gate disabled and no env var, got %v", gotIDs)
+		}
+		if len(lbAPI.attachCalls) != 0 {
+			t.Errorf("expected no attach calls, got %v", lbAPI.attachCalls)
+		}
+	})
+}
+
 // fakeLBAPI implements the subset of LoadBalancerAPI needed for attachPrivateNetworks tests.
 type fakeLBAPI struct {
 	privateNetworks []*scwlb.PrivateNetwork
@@ -391,6 +492,9 @@ func TestAttachPrivateNetworks(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Enable the PN name selector feature for all tests in this suite
+			t.Setenv(enableLBPNNameSelectorEnv, "true")
+
 			lbAPI := &fakeLBAPI{
 				privateNetworks: tt.existingPNs,
 			}

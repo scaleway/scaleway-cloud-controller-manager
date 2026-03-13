@@ -247,14 +247,21 @@ The possible formats are:
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-pn-names`
 
+> **Feature gate:** This annotation requires the `SCW_ENABLE_LB_PN_NAME_SELECTOR` environment variable
+> to be set to `"true"` on the cloud controller manager. When the environment variable is not set or set
+> to any other value, this annotation is ignored.
+
 This is the annotation to configure the Private Networks by name instead of ID.
 The private network names will be resolved to IDs at runtime. This is useful when
 you want to specify private networks without hardcoding their IDs, which can change
 when clusters are recreated.
 
+When enabled, IPAM-based node IP resolution is also activated, providing precise IP
+lookup for nodes connected to the configured private networks.
+
 **Priority order:**
 1. `service.beta.kubernetes.io/scw-loadbalancer-pn-ids` (highest priority)
-2. `service.beta.kubernetes.io/scw-loadbalancer-pn-names`
+2. `service.beta.kubernetes.io/scw-loadbalancer-pn-names` (requires `SCW_ENABLE_LB_PN_NAME_SELECTOR=true`)
 3. `PN_ID` environment variable (fallback)
 
 If both `pn-ids` and `pn-names` are set, `pn-ids` takes precedence and `pn-names` is ignored.

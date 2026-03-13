@@ -41,6 +41,12 @@ import (
 
 const MaxEntriesPerACL = 60
 
+// lbPNNameSelectorEnabled returns true if the PN name selector feature is enabled
+// via the SCW_ENABLE_LB_PN_NAME_SELECTOR environment variable.
+func lbPNNameSelectorEnabled() bool {
+	return strings.EqualFold(os.Getenv(enableLBPNNameSelectorEnv), "true")
+}
+
 type loadbalancers struct {
 	api           LoadBalancerAPI
 	instance      LBInstanceAPI
@@ -163,7 +169,7 @@ func (l *loadbalancers) EnsureLoadBalancer(ctx context.Context, clusterName stri
 		return nil, fmt.Errorf("invalid value for annotation %s: expected boolean", serviceAnnotationLoadBalancerPrivate)
 	}
 
-	if lbPrivate && l.pnID == "" && len(getPrivateNetworkIDs(service)) == 0 && len(getPrivateNetworkNames(service)) == 0 {
+	if lbPrivate && l.pnID == "" && len(getPrivateNetworkIDs(service)) == 0 && (lbPNNameSelectorEnabled() && len(getPrivateNetworkNames(service)) == 0) {
 		return nil, fmt.Errorf("scaleway-cloud-controller-manager cannot create private load balancers without a private network")
 	}
 
@@ -619,9 +625,13 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 	}
 
 	// Discover the project ID from the cluster nodes for accurate VPC/PN lookup
-	nodeProjectID, err := l.getProjectIDFromNodes(nodes, region)
-	if err != nil {
-		klog.V(3).Infof("could not determine project ID from nodes: %v, falling back to default", err)
+	// (only needed when the PN name selector feature is enabled)
+	var nodeProjectID string
+	if lbPNNameSelectorEnabled() {
+		nodeProjectID, err = l.getProjectIDFromNodes(nodes, region)
+		if err != nil {
+			klog.V(3).Infof("could not determine project ID from nodes: %v, falling back to default", err)
+		}
 	}
 
 	configuredPNIDs, err := l.attachPrivateNetworks(loadbalancer, service, lbExternallyManaged, region, nodeProjectID)
@@ -630,7 +640,7 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 	}
 
 	var targetIPs []string
-	if len(configuredPNIDs) > 0 {
+	if lbPNNameSelectorEnabled() && len(configuredPNIDs) > 0 {
 		// Use precise IPAM-based lookup to find node IPs on the configured private networks
 		targetIPs, err = l.getNodeIPsForPrivateNetworks(nodes, configuredPNIDs, region)
 		if err != nil {
@@ -638,7 +648,7 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 			targetIPs = extractNodesInternalIps(nodes)
 		}
 		klog.V(3).Infof("using private network nodes ips: %s on loadbalancer %s", strings.Join(targetIPs, ","), loadbalancer.ID)
-	} else if getForceInternalIP(service) {
+	} else if getForceInternalIP(service) || l.pnID != "" || len(getPrivateNetworkIDs(service)) > 0 {
 		targetIPs = extractNodesInternalIps(nodes)
 		klog.V(3).Infof("using internal nodes ips: %s on loadbalancer %s", strings.Join(targetIPs, ","), loadbalancer.ID)
 	} else {
@@ -866,8 +876,8 @@ func (l *loadbalancers) attachPrivateNetworks(loadbalancer *scwlb.LB, service *v
 			for _, pnID := range explicitIDs {
 				pnIDs[pnID] = false
 			}
-		} else {
-			// Priority 2: Names annotation - resolve to IDs
+		} else if lbPNNameSelectorEnabled() {
+			// Priority 2: Names annotation - resolve to IDs (requires SCW_ENABLE_LB_PN_NAME_SELECTOR=true)
 			pnNames := getPrivateNetworkNames(service)
 			if len(pnNames) > 0 {
 				resolvedIDs, err := l.resolvePrivateNetworkNames(pnNames, region, projectID)
