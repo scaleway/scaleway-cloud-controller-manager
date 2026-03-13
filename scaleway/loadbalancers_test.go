@@ -2561,3 +2561,98 @@ func TestServicePortToBackendWithHealthCheckFromService(t *testing.T) {
 		})
 	}
 }
+
+func TestGetPrivateNetworkNames(t *testing.T) {
+	tests := []struct {
+		name    string
+		service *v1.Service
+		want    []string
+	}{
+		{
+			name: "no annotation",
+			service: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{},
+				},
+			},
+			want: nil,
+		},
+		{
+			name: "empty annotation",
+			service: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"service.beta.kubernetes.io/scw-loadbalancer-pn-names": "",
+					},
+				},
+			},
+			want: nil,
+		},
+		{
+			name: "single vpc/pn entry",
+			service: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"service.beta.kubernetes.io/scw-loadbalancer-pn-names": "default/my-private-network",
+					},
+				},
+			},
+			want: []string{"default/my-private-network"},
+		},
+		{
+			name: "multiple vpc/pn entries",
+			service: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"service.beta.kubernetes.io/scw-loadbalancer-pn-names": "vpc-1/network-1,vpc-2/network-2,vpc-3/network-3",
+					},
+				},
+			},
+			want: []string{"vpc-1/network-1", "vpc-2/network-2", "vpc-3/network-3"},
+		},
+		{
+			name: "same vpc multiple networks",
+			service: &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"service.beta.kubernetes.io/scw-loadbalancer-pn-names": "default/network-1,default/network-2",
+					},
+				},
+			},
+			want: []string{"default/network-1", "default/network-2"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := getPrivateNetworkNames(tt.service)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("getPrivateNetworkNames() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPrivateNetworkIDsAnnotationTakesPrecedence(t *testing.T) {
+	// Test that pn-ids takes precedence over pn-names
+	service := &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{
+				"service.beta.kubernetes.io/scw-loadbalancer-pn-ids":   "explicit-id-1,explicit-id-2",
+				"service.beta.kubernetes.io/scw-loadbalancer-pn-names": "name-1,name-2",
+			},
+		},
+	}
+
+	// pn-ids should return the explicit IDs
+	pnIDs := getPrivateNetworkIDs(service)
+	if len(pnIDs) != 2 || pnIDs[0] != "explicit-id-1" || pnIDs[1] != "explicit-id-2" {
+		t.Errorf("getPrivateNetworkIDs() = %v, want [explicit-id-1, explicit-id-2]", pnIDs)
+	}
+
+	// pn-names should still return names (but they won't be used if pn-ids is set)
+	pnNames := getPrivateNetworkNames(service)
+	if len(pnNames) != 2 || pnNames[0] != "name-1" || pnNames[1] != "name-2" {
+		t.Errorf("getPrivateNetworkNames() = %v, want [name-1, name-2]", pnNames)
+	}
+}
