@@ -1110,7 +1110,7 @@ func servicePortToFrontend(service *v1.Service, loadbalancer *scwlb.LB, port v1.
 	}
 
 	return &scwlb.Frontend{
-		Name:                fmt.Sprintf("%s_tcp_%d", string(service.UID), port.Port),
+		Name:                fmt.Sprintf("%s_%s_%d", string(service.UID), strings.ToLower(string(port.Protocol)), port.Port),
 		InboundPort:         port.Port,
 		TimeoutClient:       &timeoutClient,
 		ConnectionRateLimit: connectionRateLimit,
@@ -1292,7 +1292,7 @@ func servicePortToBackend(service *v1.Service, loadbalancer *scwlb.LB, port v1.S
 	healthCheck.TransientCheckDelay = healthCheckTransientCheckDelay
 
 	backend := &scwlb.Backend{
-		Name:                   fmt.Sprintf("%s_tcp_%d", string(service.UID), port.NodePort),
+		Name:                   fmt.Sprintf("%s_%s_%d", string(service.UID), strings.ToLower(string(port.Protocol)), port.NodePort),
 		Pool:                   nodeIPs,
 		ForwardProtocol:        protocol,
 		SslBridging:            &sslBridging,
@@ -1330,25 +1330,30 @@ func servicePortToBackend(service *v1.Service, loadbalancer *scwlb.LB, port v1.S
 
 // serviceToLB converts a service definition to a list of load balancer frontends and backends
 func serviceToLB(service *v1.Service, loadbalancer *scwlb.LB, nodeIPs []string) (map[int32]*scwlb.Frontend, map[int32]*scwlb.Backend, error) {
-	frontends := map[int32]*scwlb.Frontend{}
-	backends := map[int32]*scwlb.Backend{}
+	tcpFrontends := map[int32]*scwlb.Frontend{}
+	tcpBackends := map[int32]*scwlb.Backend{}
 
 	for _, port := range service.Spec.Ports {
-		frontend, err := servicePortToFrontend(service, loadbalancer, port)
+		if port.Protocol != v1.ProtocolTCP {
+			klog.V(3).Infof("skipping unsupported protocol %s for port %d in service %s/%s", port.Protocol, port.Port, service.Namespace, service.Name)
+			continue
+		}
+
+		tcpFrontend, err := servicePortToFrontend(service, loadbalancer, port)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to prepare frontend for port %d: %v", port.Port, err)
 		}
 
-		backend, err := servicePortToBackend(service, loadbalancer, port, nodeIPs)
+		tcpBackend, err := servicePortToBackend(service, loadbalancer, port, nodeIPs)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to prepare backend for port %d: %v", port.Port, err)
 		}
 
-		frontends[port.Port] = frontend
-		backends[port.NodePort] = backend
+		tcpFrontends[port.Port] = tcpFrontend
+		tcpBackends[port.NodePort] = tcpBackend
 	}
 
-	return frontends, backends, nil
+	return tcpFrontends, tcpBackends, nil
 }
 
 // frontendEquals returns true if the two frontends configuration are equal
@@ -1482,7 +1487,7 @@ func backendEquals(got, want *scwlb.Backend) bool {
 }
 
 type frontendOps struct {
-	remove map[int32]*scwlb.Frontend
+	remove []*scwlb.Frontend
 	update map[int32]*scwlb.Frontend
 	create map[int32]*scwlb.Frontend
 	keep   map[int32]*scwlb.Frontend
@@ -1491,42 +1496,42 @@ type frontendOps struct {
 // compareFrontends returns the frontends operation to do to achieve the wanted configuration
 // will ignore frontends with names not starting with the filterPrefix if provided
 func compareFrontends(got []*scwlb.Frontend, want map[int32]*scwlb.Frontend, filterPrefix string) frontendOps {
-	remove := make(map[int32]*scwlb.Frontend)
+	remove := make([]*scwlb.Frontend, 0)
 	update := make(map[int32]*scwlb.Frontend)
 	create := make(map[int32]*scwlb.Frontend)
 	keep := make(map[int32]*scwlb.Frontend)
 
-	filteredGot := make([]*scwlb.Frontend, 0, len(got))
-	for _, current := range got {
-		if strings.HasPrefix(current.Name, filterPrefix) {
-			filteredGot = append(filteredGot, current)
-		}
-	}
+	lbEvaluatedFrontendMap := make(map[int32]*scwlb.Frontend)
 
 	// Check for deletions and updates
-	for _, current := range filteredGot {
+	for _, current := range got {
+		if !strings.HasPrefix(current.Name, filterPrefix) {
+			continue
+		}
+
+		// Will remove duplicated frontends with the same InboundPort.
+		if _, ok := lbEvaluatedFrontendMap[current.InboundPort]; ok {
+			remove = append(remove, current)
+			continue
+		} else {
+			lbEvaluatedFrontendMap[current.InboundPort] = current
+		}
+
 		if target, ok := want[current.InboundPort]; ok {
-			if !frontendEquals(current, target) {
+			if frontendEquals(current, target) {
+				keep[target.InboundPort] = current
+			} else {
 				target.ID = current.ID
 				update[target.InboundPort] = target
-			} else {
-				keep[target.InboundPort] = current
 			}
 		} else {
-			remove[current.InboundPort] = current
+			remove = append(remove, current)
 		}
 	}
 
 	// Check for additions
 	for _, target := range want {
-		found := false
-		for _, current := range filteredGot {
-			if current.InboundPort == target.InboundPort {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if _, ok := lbEvaluatedFrontendMap[target.InboundPort]; !ok {
 			create[target.InboundPort] = target
 		}
 	}
@@ -1540,7 +1545,7 @@ func compareFrontends(got []*scwlb.Frontend, want map[int32]*scwlb.Frontend, fil
 }
 
 type backendOps struct {
-	remove map[int32]*scwlb.Backend
+	remove []*scwlb.Backend
 	update map[int32]*scwlb.Backend
 	create map[int32]*scwlb.Backend
 	keep   map[int32]*scwlb.Backend
@@ -1548,42 +1553,42 @@ type backendOps struct {
 
 // compareBackends returns the backends operation to do to achieve the wanted configuration
 func compareBackends(got []*scwlb.Backend, want map[int32]*scwlb.Backend, filterPrefix string) backendOps {
-	remove := make(map[int32]*scwlb.Backend)
+	remove := make([]*scwlb.Backend, 0)
 	update := make(map[int32]*scwlb.Backend)
 	create := make(map[int32]*scwlb.Backend)
 	keep := make(map[int32]*scwlb.Backend)
 
-	filteredGot := make([]*scwlb.Backend, 0, len(got))
-	for _, current := range got {
-		if strings.HasPrefix(current.Name, filterPrefix) {
-			filteredGot = append(filteredGot, current)
-		}
-	}
+	lbEvaluatedBackendMap := make(map[int32]*scwlb.Backend)
 
 	// Check for deletions and updates
-	for _, current := range filteredGot {
+	for _, current := range got {
+		if !strings.HasPrefix(current.Name, filterPrefix) {
+			continue
+		}
+
+		// Will remove duplicated backends with the same ForwardPort.
+		if _, ok := lbEvaluatedBackendMap[current.ForwardPort]; ok {
+			remove = append(remove, current)
+			continue
+		} else {
+			lbEvaluatedBackendMap[current.ForwardPort] = current
+		}
+
 		if target, ok := want[current.ForwardPort]; ok {
-			if !backendEquals(current, target) {
+			if backendEquals(current, target) {
+				keep[target.ForwardPort] = current
+			} else {
 				target.ID = current.ID
 				update[target.ForwardPort] = target
-			} else {
-				keep[target.ForwardPort] = current
 			}
 		} else {
-			remove[current.ForwardPort] = current
+			remove = append(remove, current)
 		}
 	}
 
 	// Check for additions
 	for _, target := range want {
-		found := false
-		for _, current := range filteredGot {
-			if current.ForwardPort == target.ForwardPort {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if _, ok := lbEvaluatedBackendMap[target.ForwardPort]; !ok {
 			create[target.ForwardPort] = target
 		}
 	}

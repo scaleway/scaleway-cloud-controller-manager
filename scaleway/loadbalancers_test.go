@@ -637,7 +637,7 @@ func TestServicePortToFrontend(t *testing.T) {
 
 	for _, tt := range matrix {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := servicePortToFrontend(tt.service, &scwlb.LB{ID: "lbid"}, v1.ServicePort{Port: 1234})
+			got, err := servicePortToFrontend(tt.service, &scwlb.LB{ID: "lbid"}, v1.ServicePort{Port: 1234, Protocol: v1.ProtocolTCP})
 			if tt.wantErr != (err != nil) {
 				t.Errorf("got error: %s, expected: %v", err, tt.wantErr)
 				return
@@ -2559,5 +2559,46 @@ func TestServicePortToBackendWithHealthCheckFromService(t *testing.T) {
 				t.Errorf("Expected exactly 1 health check config to be set, got %d: %v", len(setConfigs), setConfigs)
 			}
 		})
+	}
+}
+
+func TestServiceToLB_UDPPortsIgnored(t *testing.T) {
+	service := &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			UID:         "test-uid",
+			Annotations: map[string]string{},
+		},
+		Spec: v1.ServiceSpec{
+			Ports: []v1.ServicePort{
+				{Port: 80, NodePort: 30080, Protocol: v1.ProtocolTCP},
+				{Port: 53, NodePort: 30053, Protocol: v1.ProtocolUDP},
+			},
+		},
+	}
+
+	frontends, backends, err := serviceToLB(service, &scwlb.LB{ID: "test-lb"}, []string{"10.0.0.1"})
+	if err != nil {
+		t.Fatalf("serviceToLB() error = %v", err)
+	}
+
+	if _, ok := frontends[80]; !ok {
+		t.Error("expected frontend for TCP port 80")
+	}
+	if _, ok := frontends[53]; ok {
+		t.Error("unexpected frontend for UDP port 53")
+	}
+
+	if _, ok := backends[30080]; !ok {
+		t.Error("expected backend for TCP nodePort 30080")
+	}
+	if _, ok := backends[30053]; ok {
+		t.Error("unexpected backend for UDP nodePort 30053")
+	}
+
+	if len(frontends) != 1 {
+		t.Errorf("expected 1 frontend, got %d", len(frontends))
+	}
+	if len(backends) != 1 {
+		t.Errorf("expected 1 backend, got %d", len(backends))
 	}
 }
