@@ -53,6 +53,11 @@ const (
 	loadBalancerDefaultTypeEnv = "LB_DEFAULT_TYPE"
 
 	privateNetworkID = "PN_ID"
+
+	// enableLBPNNameSelectorEnv enables the selector-style annotation for LB to VPC/PN association.
+	// When set to "true", the pn-names annotation and IPAM-based node IP resolution are enabled.
+	// This feature is gated because it can cause issues on the Scaleway backend at scale.
+	enableLBPNNameSelectorEnv = "SCW_ENABLE_LB_PN_NAME_SELECTOR"
 )
 
 type cloud struct {
