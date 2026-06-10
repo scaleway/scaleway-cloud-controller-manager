@@ -1702,7 +1702,7 @@ func (l *loadbalancers) updateBackend(service *v1.Service, loadbalancer *scwlb.L
 	if _, err := l.api.UpdateHealthCheck(&scwlb.ZonedAPIUpdateHealthCheckRequest{
 		Zone:                loadbalancer.Zone,
 		BackendID:           backend.ID,
-		Port:                backend.ForwardPort,
+		Port:                backend.HealthCheck.Port,
 		CheckDelay:          backend.HealthCheck.CheckDelay,
 		CheckTimeout:        backend.HealthCheck.CheckTimeout,
 		CheckMaxRetries:     backend.HealthCheck.CheckMaxRetries,
