@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"reflect"
 	"strconv"
@@ -1858,10 +1859,26 @@ func makeACLSpecs(service *v1.Service, nodes []*v1.Node, frontend *scwlb.Fronten
 		return []*scwlb.ACLSpec{}
 	}
 
+	sourceRanges := make([]string, 0, len(service.Spec.LoadBalancerSourceRanges))
+	for _, sourceRange := range service.Spec.LoadBalancerSourceRanges {
+		if _, _, err := net.ParseCIDR(sourceRange); err != nil {
+			klog.Warningf("ignoring invalid CIDR %s in LoadBalancerSourceRanges for service %s/%s: %v", sourceRange, service.Namespace, service.Name, err)
+			continue
+		}
+
+		if strings.Contains(sourceRange, ":") {
+			sourceRange = strings.TrimSuffix(sourceRange, "/128")
+		} else {
+			sourceRange = strings.TrimSuffix(sourceRange, "/32")
+		}
+
+		sourceRanges = append(sourceRanges, sourceRange)
+	}
+
 	aclPrefix := makeACLPrefix(frontend)
 	whitelist := extractNodesInternalIps(nodes)
 	whitelist = append(whitelist, extractNodesExternalIps(nodes)...)
-	whitelist = append(whitelist, strip32SubnetMasks(service.Spec.LoadBalancerSourceRanges)...)
+	whitelist = append(whitelist, sourceRanges...)
 
 	slices.Sort(whitelist)
 
@@ -1893,14 +1910,6 @@ func makeACLSpecs(service *v1.Service, nodes []*v1.Node, frontend *scwlb.Fronten
 	}
 
 	return acls
-}
-
-func strip32SubnetMasks(subnets []string) []string {
-	stripped := make([]string, len(subnets))
-	for idx, subnet := range subnets {
-		stripped[idx] = strings.TrimSuffix(subnet, "/32")
-	}
-	return stripped
 }
 
 func ptrInt32ToString(i *int32) string {
