@@ -28,12 +28,12 @@ const (
 	serviceAnnotationLoadBalancerForwardPortAlgorithm = "service.beta.kubernetes.io/scw-loadbalancer-forward-port-algorithm"
 
 	// serviceAnnotationLoadBalancerStickySessions is the annotation to enable cookie-based session persistence
-	// The defaut value is "none" and the possible valuea are "none", "cookie", or "table"
+	// The default value is "none" and the possible values are "none", "cookie", or "table"
 	// NB: If the value "cookie" is used, the annotation service.beta.kubernetes.io/scw-loadbalancer-sticky-sessions-cookie-name must be set
 	serviceAnnotationLoadBalancerStickySessions = "service.beta.kubernetes.io/scw-loadbalancer-sticky-sessions"
 
 	// serviceAnnotationLoadBalancerStickySessionsCookieName is the annotation for the cookie name for sticky sessions
-	// NB: muste be set if service.beta.kubernetes.io/scw-loadbalancer-sticky-sessions is set to "cookie"
+	// NB: must be set if service.beta.kubernetes.io/scw-loadbalancer-sticky-sessions is set to "cookie"
 	serviceAnnotationLoadBalancerStickySessionsCookieName = "service.beta.kubernetes.io/scw-loadbalancer-sticky-sessions-cookie-name"
 
 	// serviceAnnotationLoadBalancerHealthCheckType is the type of health check used
@@ -58,7 +58,7 @@ const (
 	// The default value is "5s". The duration are go's time.Duration (ex: "1s", "2m", "4h", ...)
 	serviceAnnotationLoadBalancerHealthCheckTimeout = "service.beta.kubernetes.io/scw-loadbalancer-health-check-timeout"
 
-	// serviceAnnotationLoadBalancerHealthCheckMaxRetries is the number of consecutive unsuccessful health checks, after wich the server will be considered dead
+	// serviceAnnotationLoadBalancerHealthCheckMaxRetries is the number of consecutive unsuccessful health checks, after which the server will be considered dead
 	// The default value is "5".
 	serviceAnnotationLoadBalancerHealthCheckMaxRetries = "service.beta.kubernetes.io/scw-loadbalancer-health-check-max-retries"
 
@@ -178,7 +178,7 @@ const (
 	// "<certificate-id>": will use this certificate for all frontends
 	// "<certificate-id>,<certificate-id>" will use these certificates for all frontends
 	// "<port1>:<certificate1-id>,<certificate2-id>;<port2>,<port3>:<certificate3-id>" will use certificate 1 and 2 for frontend with port port1
-	// and certificate3 for frotend with port port2 and port3
+	// and certificate3 for frontend with port port2 and port3
 	serviceAnnotationLoadBalancerCertificateIDs = "service.beta.kubernetes.io/scw-loadbalancer-certificate-ids"
 
 	// serviceAnnotationLoadBalancerTargetNodeLabels is the annotation to target nodes with specific label(s)

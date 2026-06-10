@@ -1,112 +1,48 @@
 # Getting started
 
-## Make the cloud controller image
+This guide shows how to deploy `scaleway-cloud-controller-manager` (CCM) on a self-managed
+Kubernetes cluster running on Scaleway Instances or Elastic Metal servers.
 
-The cloud-controller-manager has to be deployed in a `kubernetes` cluster. To do so you need an image which can be deployed as a `kubernetes` object.
+**WARNING**: If you are using [Scaleway Kapsule](https://www.scaleway.com/en/kubernetes-kapsule)
+(Scaleway Managed Kubernetes), the CCM is already deployed for you. Deploying it yourself on a
+Kapsule cluster is not needed and may cause conflicts.
 
-Using the `Makefile` compile the `cloud-controller-manager` and make an image out of it
+## Prerequisites
 
-```bash
-make docker-build
-```
+You need a Kubernetes cluster running on Scaleway resources, bootstrapped with the
+`--cloud-provider=external` flag so that the kubelet defers node initialization to the CCM.
 
-It will :
-
-- Fetch the `go` dependencies
-- Build the `cloud-controller-manager`
-- Make a `docker` image out of it
-
-(Optional) You can push own fresh image of the controller to a registry :
-
-```
-# docker tag scaleway/scaleway-cloud-controller-manager:d1e51ce3 rg.fr-par.scw.cloud/test/scaleway-cloud-controller-manager:dev
-docker push rg.fr-par.scw.cloud/test/scaleway-cloud-controller-manager:dev
-The push refers to repository [rg.fr-par.scw.cloud/test/scaleway-cloud-controller-manager]
-c6ff308811cb: Pushed 
-cd099fd7777d: Pushed 
-8dfad2055603: Pushed 
-dev: digest: sha256:13ab072a17eec9694b40bb978f4ef75cb964ae65938a8b1c8bd7d6a8f2c1bd58 size: 950
-```
-
-## Create a Kubernetes cluster on Scaleway using kubeadm
-
-Create a `Kubernetes` cluster using `kubeadm`.
-
-For the purpose on this example, you will need to create 3 ubuntu bionic instances.
-
-- master1
-- node1
-- node2
-
-Run the following commands on each instances :
+If you are bootstrapping a new cluster with `kubeadm`, follow the
+[official kubeadm installation guide](https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/install-kubeadm/)
+and make sure every node (control-plane and workers) is started with:
 
 ```bash
-apt-get update && apt-get install -y \
-    iptables \
-    arptables \
-    ebtables \
-    apt-transport-https \
-    ca-certificates \
-    curl \
-    gnupg-agent \
-    software-properties-common
-curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add -
-add-apt-repository \
-   "deb [arch=amd64] https://apt.kubernetes.io kubernetes-xenial main"
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add -
-add-apt-repository \
-   "deb [arch=amd64] https://download.docker.com/linux/ubuntu \
-   $(lsb_release -cs) \
-   stable"
-apt-get update && apt-get install -y \
-    docker-ce docker-ce-cli containerd.io kubelet kubeadm kubectl
-apt-mark hold \
-    docker-ce docker-ce-cli containerd.io kubelet kubeadm kubectl
-echo KUBELET_EXTRA_ARGS=\"--cloud-provider=external\" > /etc/default/kubelet
+echo 'KUBELET_EXTRA_ARGS="--cloud-provider=external"' > /etc/default/kubelet
 ```
 
-Intialize the master:
+Then initialize the control plane and join your worker nodes as usual, e.g.:
 
 ```bash
 kubeadm init --control-plane-endpoint=$(scw-metadata PUBLIC_IP_ADDRESS) --apiserver-cert-extra-sans=$(scw-metadata PUBLIC_IP_ADDRESS)
-mkdir -p ~/.kube
+mkdir -p $HOME/.kube
 cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
 chown $(id -u):$(id -g) $HOME/.kube/config
-kubectl apply -f https://docs.projectcalico.org/v3.11/manifests/calico.yaml
 ```
 
-Write the kubeadm join command, you will need it to join worker nodes. Also, you can also copy the kubeconfig file to your computer.
+Install a CNI plugin of your choice (e.g. [Cilium](https://docs.cilium.io/en/stable/gettingstarted/k8s-install-default/)
+or [Calico](https://docs.tigera.io/calico/latest/getting-started/kubernetes/)) before continuing,
+as nodes will stay `NotReady` until the CNI is installed and the CCM has initialized them.
 
-Execute the join command on your nodes, repeat this operation on each worker nodes:
+## Configure your Scaleway credentials
 
-```bash
-kubeadm join 10.68.34.145:6443 --token itvo0b.kwoao79ptlj22gno \
-    --discovery-token-ca-cert-hash sha256:07bc3f9601f1659771a7a6fd696c2969cbc757b088ec752ba95d5a42c06ed91f 
-```
+The CCM needs a Scaleway API key (access key + secret key), and the region/zone where it should
+operate. See the [configuration reference](configuration.md) for the full list of supported
+environment variables.
 
-And then, execute on the master (or your computer if you copied the kubeconfig):
+Create a Secret with your credentials, based on
+[`examples/k8s-scaleway-secret.yml`](../examples/k8s-scaleway-secret.yml):
 
-```bash
-master1# kubectl get nodes
-NAME      STATUS     ROLES    AGE     VERSION
-master1   NotReady   master   5m43s   v1.17.2
-node1     NotReady   <none>   2m17s   v1.17.2
-node2     NotReady   <none>   77s     v1.17.2
-```
-
-The cluster is ready, you now have a working cluster, you can now deploy the `cloud-controller-manager`
-
-## Deploy the cloud-controller-manager on this cluster
-
-To deploy the `cloud-controller-manager` you will need :
-* Your access key.
-* Your secret key.
-* Your organization or project id.
-* The Scaleway region.
-
-Create a `k8s-scaleway-secret.yml` file containing these informations.
-
-_Hint: You can find those information on [https://console.scaleway.com/account/credentials](https://console.scaleway.com/account/credential)_
+_Hint: You can generate an API key from the [Scaleway console](https://console.scaleway.com/iam/api-keys)._
 
 ```yaml
 apiVersion: v1
@@ -114,38 +50,41 @@ kind: Secret
 metadata:
   name: scaleway-secret
   namespace: kube-system
+type: Opaque
 stringData:
   SCW_ACCESS_KEY: "xxxxxxxxxxxxxxxx"
   SCW_SECRET_KEY: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-  SCW_DEFAULT_REGION: "fr-par"
   SCW_DEFAULT_PROJECT_ID: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxx"
+  SCW_DEFAULT_REGION: "fr-par"
+  SCW_DEFAULT_ZONE: "fr-par-1"
 ```
 
-Create the `secret` and deploy the controller
+```bash
+kubectl apply -f k8s-scaleway-secret.yml
+```
+
+## Deploy the cloud-controller-manager
+
+Deploy the CCM using the [example manifest](../examples/k8s-scaleway-ccm-latest.yml), which
+includes the Deployment, ServiceAccount and RBAC rules required by the CCM:
 
 ```bash
-kubectl create -f k8s-scaleway-secret.yml
 kubectl apply -f https://raw.githubusercontent.com/scaleway/scaleway-cloud-controller-manager/master/examples/k8s-scaleway-ccm-latest.yml
 ```
 
 ## Check the cloud-controller-manager is working
 
-Check the `cloud-controller-manager` is running.
+Check that the `cloud-controller-manager` pod is running, and that nodes become `Ready` once it
+has initialized them:
 
 ```bash
-root@master1:~# kubectl get pods -n kube-system -l app=scaleway-cloud-controller-manager
-NAME                                                 READY   STATUS    RESTARTS   AGE
-scaleway-cloud-controller-manager-774f5487d5-7z5dd   1/1     Running   7          3m
-root@master1:~# kubectl get nodes
-NAME      STATUS     ROLES    AGE     VERSION
-master1   NotReady   master   5m43s   v1.17.2
-node1     NotReady   <none>   2m17s   v1.17.2
-node2     NotReady   <none>   77s     v1.17.2
+kubectl get pods -n kube-system -l app=scaleway-cloud-controller-manager
+kubectl get nodes
 ```
 
-Deploy a `LoadBalancer` service and verify a public ip is assigned to this service. If it is the case you're all good, you have deployed a cluster with `kubeadm` and the `scaleway-cloud-controlle-manager
-
-Create a lb.yaml that contain the following object:
+Once nodes are `Ready`, you can verify the LoadBalancer integration by deploying a `Service` of
+`type: LoadBalancer` - see the [LoadBalancer examples](loadbalancer-examples.md) for a full
+walkthrough:
 
 ```yaml
 apiVersion: v1
@@ -161,11 +100,10 @@ spec:
   type: LoadBalancer
 ```
 
+```bash
+kubectl apply -f lb.yaml
+kubectl get services
 ```
-# kubectl create -f lb.yml
-# kubectl get services
-root@master1:~# kubectl get services
-NAME              TYPE           CLUSTER-IP      EXTERNAL-IP    PORT(S)          AGE
-example-service   LoadBalancer   10.110.17.115   51.159.26.63   8765:32370/TCP   6d23h
-kubernetes        ClusterIP      10.96.0.1       <none>         443/TCP          7d
-```
+
+After a few seconds, an `EXTERNAL-IP` should be assigned to the service - this is the IP of the
+Scaleway Load Balancer created by the CCM.

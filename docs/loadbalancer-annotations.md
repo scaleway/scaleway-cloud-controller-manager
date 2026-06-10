@@ -16,7 +16,10 @@ spec:
 
 ## Load balancer properties
 
-You can get a list of working annotation on in the Scaleway loadBalancer [documentation](https://www.scaleway.com/en/developers/api/load-balancer/zoned-api/) annotations are:
+The list of supported annotations is available below. The Scaleway Load Balancer
+[API documentation](https://www.scaleway.com/en/developers/api/load-balancer/zoned-api/) can help
+you understand what each annotation changes, but not all API fields are necessarily exposed as
+an annotation here.
 
 Note:
 - If an invalid mode is passed in the annotation, the service will throw an error.
@@ -32,12 +35,12 @@ The default value is `roundrobin` and the possible values are `roundrobin`, `lea
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-sticky-sessions`
 This is the annotation to enable cookie-based session persistence.
-The defaut value is `none` and the possible valuea are `none`, `cookie`, or `table`.
+The default value is `none` and the possible values are `none`, `cookie`, or `table`.
 NB: If the value `cookie` is used, the annotation `service.beta.kubernetes.io/scw-loadbalancer-sticky-sessions-cookie-name` must be set.
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-sticky-sessions-cookie-name`
 This is the annotation for the cookie name for sticky sessions.
-NB: muste be set if `service.beta.kubernetes.io/scw-loadbalancer-sticky-sessions` is set to `cookie`.
+NB: must be set if `service.beta.kubernetes.io/scw-loadbalancer-sticky-sessions` is set to `cookie`.
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-health-check-type`
 This is the type of health check used.
@@ -62,11 +65,11 @@ This is the annotation to set the time between two consecutive health checks in 
 The default value is `0.5s`. The duration are go's time.Duration (ex: `1s`, `2m`, `4h`, ...).
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-health-check-timeout`
-This is the annotaton to set the additional check timeout, after the connection has been already established.
+This is the annotation to set the additional check timeout, after the connection has been already established.
 The default value is `5s`. The duration are go's time.Duration (ex: `1s`, `2m`, `4h`, ...).
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-health-check-max-retries`
-This is the annotation to set the number of consecutive unsuccessful health checks, after wich the server will be considered dead.
+This is the annotation to set the number of consecutive unsuccessful health checks, after which the server will be considered dead.
 The default value is `5`.
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-health-check-http-uri`
@@ -110,6 +113,8 @@ The possible values are `false`, `true` or `*` for all ports or a comma delimite
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-type`
 This is the annotation to set the load balancer offer type.
+If unset, the type set by the `LB_DEFAULT_TYPE` environment variable is used, see the
+[configuration reference](configuration.md#lb_default_type).
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-connection-rate-limit`
 This is the annotation to set the incoming connection rate limit per second.
@@ -178,7 +183,7 @@ This is the annotation to choose the the certificate IDs to associate with this 
 The possible format are:
  - `<certificate-id>`: will use this certificate for all frontends
  - `<certificate-id>,<certificate-id>` will use these certificates for all frontends
- - `<port1>:<certificate1-id>,<certificate2-id>;<port2>,<port3>:<certificate3-id>` will use certificate 1 and 2 for frontend with port port1 and certificate3 for frotend with port port2 and port3
+ - `<port1>:<certificate1-id>,<certificate2-id>;<port2>,<port3>:<certificate3-id>` will use certificate 1 and 2 for frontend with port port1 and certificate3 for frontend with port port2 and port3
 
 ### `service.beta.kubernetes.io/scw-loadbalancer-target-node-labels`
 This is the annotation to target nodes with specific label(s).  
@@ -238,7 +243,8 @@ This is the annotation to configure the Private Networks
 that will be attached to the load balancer. It is possible to provide a single
 Private Network ID, or a comma delimited list of Private Network IDs.
 If this annotation is not set or empty, the load balancer will be attached
-to the Private Network specified in the `PN_ID` environment variable.
+to the Private Network specified in the `PN_ID` environment variable, see the
+[configuration reference](configuration.md#pn_id).
 This annotation is ignored when `service.beta.kubernetes.io/scw-loadbalancer-externally-managed` is enabled.
 
 The possible formats are:
