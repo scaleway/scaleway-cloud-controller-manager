@@ -8,7 +8,7 @@ jobs:
     strategy:
       matrix:
         go-version: [1.25.x]
-        platform: [ubuntu-latest]
+        platform: [ubuntu-24.04, ubuntu-24.04-arm]
     runs-on: ${{ matrix.platform }}
     steps:
     # Checkout should always be before setup-go to ensure caching is working
@@ -20,12 +20,12 @@ jobs:
         go-version: ${{ matrix.go-version }}
     - name: Run unit tests
       run: make test
+
   build-test:
     strategy:
       matrix:
         go-version: [1.25.x]
-        platform: [ubuntu-latest]
-        arch: [386, amd64, arm, arm64]
+        platform: [ubuntu-24.04, ubuntu-24.04-arm]
     runs-on: ${{ matrix.platform }}
     steps:
     # Checkout should always be before setup-go to ensure caching is working
@@ -36,4 +36,4 @@ jobs:
       with:
         go-version: ${{ matrix.go-version }}
     - name: Building binary
-      run: GOARCH=${{ matrix.arch }} make compile
+      run: make compile
