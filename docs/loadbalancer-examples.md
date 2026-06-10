@@ -10,12 +10,15 @@ To create a load balancer you first have to have an running application. In the 
 
 ```yaml
 # examples/demo-nginx-deployment.yaml
-apiVersion: apps/v1beta1
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: nginx-deployment
 spec:
   replicas: 2
+  selector:
+    matchLabels:
+      app: demo-nginx
   template:
     metadata:
       labels:
@@ -69,13 +72,13 @@ _Note: you can append `--watch` to the command to automaticaly refresh the resul
 ```bash
 $ kubectl get svc
 NAME            CLUSTER-IP     EXTERNAL-IP      PORT(S)        AGE
-demo-nginx      10.96.97.137   51.15.224.149    80:30132/TCP   3m
+demo-nginx      10.96.97.137   203.0.113.10     80:30132/TCP   3m
 ```
 
 You can now access your service via the provisioned load balancer
 
 ```bash
-curl -i http://51.15.224.149
+curl -i http://203.0.113.10
 ```
 
 ## Deploy a loadbalancer with specific IP
@@ -84,10 +87,9 @@ Instead of creating a loadbalancer service with an ephemeral IP (which changes e
 
 _Warning: LoadBalancer ips are different from Instance ips. You cannot use an instance ip on a load-balancer and vice versa._
 
-To reserve a loadbalancer IP through API :
+To reserve a loadbalancer IP using the [Scaleway CLI](https://github.com/scaleway/scaleway-cli):
 ```bash
-curl -X POST "https://api.scaleway.com/lb/v1/regions/$SCW_DEFAULT_REGION/ips" -H "X-Auth-Token: $SCW_SECRET_KEY" -H "Content-Type: application/json" \
--d "{\"organization_id\":\"$SCW_DEFAULT_ORGANIZATION_ID\"} | jq -r .id"
+scw lb ip create zone=$SCW_DEFAULT_ZONE project-id=$SCW_DEFAULT_PROJECT_ID -o json | jq -r .id
 ```
 
 Now specify the ID of this IP address in the `service.beta.kubernetes.io/scw-loadbalancer-ip-ids` annotation.
@@ -115,7 +117,7 @@ It's possible to keep an ephemeral address (converting into a reserved address) 
 
 ```bash
 export CURRENT_EXTERNAL_IP=$(kubectl get svc $SERVICE_NAME -o json | jq -r .status.loadBalancer.ingress[0].ip)
-export CURRENT_EXTERNAL_IP_ID=$(curl -s "https://api.scaleway.com/lb/v1/regions/$SCW_DEFAULT_REGION/ips?ip_address=${CURRENT_EXTERNAL_IP}" -H "X-Auth-Token: $SCW_SECRET_KEY" | jq -r .ips[0].id)
+export CURRENT_EXTERNAL_IP_ID=$(scw lb ip list zone=$SCW_DEFAULT_ZONE ip-address=$CURRENT_EXTERNAL_IP -o json | jq -r '.[0].id')
 kubectl patch svc $SERVICE_NAME --type merge --patch "{\"metadata\":{\"annotations\": {\"service.beta.kubernetes.io/scw-loadbalancer-ip-ids\": \"$CURRENT_EXTERNAL_IP_ID\"}}}"
 ```
 
