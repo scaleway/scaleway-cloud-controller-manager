@@ -18,6 +18,7 @@ package scaleway
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -1528,6 +1529,181 @@ func TestMakeACLPrefix(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestMakeACLSpecs(t *testing.T) {
+	allowACL := &scwlb.ACLAction{Type: scwlb.ACLActionTypeAllow}
+	denyACL := &scwlb.ACLAction{Type: scwlb.ACLActionTypeDeny}
+	denyAllMatch := &scwlb.ACLMatch{IPSubnet: scw.StringSlicePtr([]string{"0.0.0.0/0", "::/0"})}
+
+	t.Run("no source ranges returns empty acls", func(t *testing.T) {
+		got := makeACLSpecs(&v1.Service{}, nil, nil)
+		want := []*scwlb.ACLSpec{}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("want: %v, got: %v", want, got)
+		}
+	})
+
+	matrix := []struct {
+		name         string
+		sourceRanges []string
+		nodes        []*v1.Node
+		frontend     *scwlb.Frontend
+		want         []*scwlb.ACLSpec
+	}{
+		{
+			name:         "ipv4 /32 mask is stripped",
+			sourceRanges: []string{"1.2.3.4/32"},
+			want: []*scwlb.ACLSpec{
+				{
+					Name:   "lb-source-range-0",
+					Action: allowACL,
+					Index:  0,
+					Match:  &scwlb.ACLMatch{IPSubnet: scw.StringSlicePtr([]string{"1.2.3.4"})},
+				},
+				{
+					Name:   "lb-source-range-end",
+					Action: denyACL,
+					Index:  1,
+					Match:  denyAllMatch,
+				},
+			},
+		},
+		{
+			name:         "ipv4 non-/32 mask is kept",
+			sourceRanges: []string{"10.0.0.0/24"},
+			want: []*scwlb.ACLSpec{
+				{
+					Name:   "lb-source-range-0",
+					Action: allowACL,
+					Index:  0,
+					Match:  &scwlb.ACLMatch{IPSubnet: scw.StringSlicePtr([]string{"10.0.0.0/24"})},
+				},
+				{
+					Name:   "lb-source-range-end",
+					Action: denyACL,
+					Index:  1,
+					Match:  denyAllMatch,
+				},
+			},
+		},
+		{
+			name:         "ipv6 /128 mask is stripped",
+			sourceRanges: []string{"2001:db8::1/128"},
+			want: []*scwlb.ACLSpec{
+				{
+					Name:   "lb-source-range-0",
+					Action: allowACL,
+					Index:  0,
+					Match:  &scwlb.ACLMatch{IPSubnet: scw.StringSlicePtr([]string{"2001:db8::1"})},
+				},
+				{
+					Name:   "lb-source-range-end",
+					Action: denyACL,
+					Index:  1,
+					Match:  denyAllMatch,
+				},
+			},
+		},
+		{
+			name:         "ipv6 non-/128 mask is kept",
+			sourceRanges: []string{"2001:db8::/32"},
+			want: []*scwlb.ACLSpec{
+				{
+					Name:   "lb-source-range-0",
+					Action: allowACL,
+					Index:  0,
+					Match:  &scwlb.ACLMatch{IPSubnet: scw.StringSlicePtr([]string{"2001:db8::/32"})},
+				},
+				{
+					Name:   "lb-source-range-end",
+					Action: denyACL,
+					Index:  1,
+					Match:  denyAllMatch,
+				},
+			},
+		},
+		{
+			name:         "invalid CIDR is ignored",
+			sourceRanges: []string{"not-a-cidr", "1.2.3.4/32"},
+			want: []*scwlb.ACLSpec{
+				{
+					Name:   "lb-source-range-0",
+					Action: allowACL,
+					Index:  0,
+					Match:  &scwlb.ACLMatch{IPSubnet: scw.StringSlicePtr([]string{"1.2.3.4"})},
+				},
+				{
+					Name:   "lb-source-range-end",
+					Action: denyACL,
+					Index:  1,
+					Match:  denyAllMatch,
+				},
+			},
+		},
+		{
+			name:         "source ranges are combined with node ips, sorted, and use the frontend prefix",
+			sourceRanges: []string{"1.2.3.4/32"},
+			nodes: []*v1.Node{
+				{Status: v1.NodeStatus{Addresses: []v1.NodeAddress{
+					{Type: v1.NodeInternalIP, Address: "10.0.0.1"},
+					{Type: v1.NodeExternalIP, Address: "51.15.0.1"},
+				}}},
+			},
+			frontend: &scwlb.Frontend{ID: "uid"},
+			want: []*scwlb.ACLSpec{
+				{
+					Name:   "uid-lb-source-range-0",
+					Action: allowACL,
+					Index:  0,
+					Match:  &scwlb.ACLMatch{IPSubnet: scw.StringSlicePtr([]string{"1.2.3.4", "10.0.0.1", "51.15.0.1"})},
+				},
+				{
+					Name:   "uid-lb-source-range-end",
+					Action: denyACL,
+					Index:  1,
+					Match:  denyAllMatch,
+				},
+			},
+		},
+	}
+
+	for _, tt := range matrix {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := &v1.Service{
+				Spec: v1.ServiceSpec{LoadBalancerSourceRanges: tt.sourceRanges},
+			}
+			got := makeACLSpecs(svc, tt.nodes, tt.frontend)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("want: %v, got: %v", tt.want, got)
+			}
+		})
+	}
+
+	t.Run("whitelist is split into multiple ACL chunks", func(t *testing.T) {
+		sourceRanges := make([]string, 0, MaxEntriesPerACL+1)
+		for i := 0; i <= MaxEntriesPerACL; i++ {
+			sourceRanges = append(sourceRanges, fmt.Sprintf("10.0.%d.1/32", i))
+		}
+
+		svc := &v1.Service{
+			Spec: v1.ServiceSpec{LoadBalancerSourceRanges: sourceRanges},
+		}
+		got := makeACLSpecs(svc, nil, nil)
+
+		if len(got) != 3 {
+			t.Fatalf("expected 3 acls, got %d", len(got))
+		}
+		if got[0].Name != "lb-source-range-0" || got[0].Index != 0 || len(got[0].Match.IPSubnet) != MaxEntriesPerACL {
+			t.Errorf("unexpected first chunk: %+v", got[0])
+		}
+		if got[1].Name != "lb-source-range-1" || got[1].Index != 1 || len(got[1].Match.IPSubnet) != 1 {
+			t.Errorf("unexpected second chunk: %+v", got[1])
+		}
+		if got[2].Name != "lb-source-range-end" || got[2].Index != 2 || got[2].Action.Type != scwlb.ACLActionTypeDeny {
+			t.Errorf("unexpected last chunk: %+v", got[2])
+		}
+	})
 }
 
 func TestGetHTTPHealthCheck(t *testing.T) {
