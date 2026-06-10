@@ -4,35 +4,68 @@ on:
     tags:
       - '*'
 jobs:
-  release:
-    runs-on: ubuntu-latest
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.tagName.outputs.tag }}
+      is_highest: ${{ steps.highestTag.outputs.is_highest }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
+      - name: Get tag
+        uses: little-core-labs/get-git-tag@v3.0.2
+        id: tagName
       - name: Highest tag
         id: highestTag
         run: |
           git fetch --depth=1 origin +refs/tags/*:refs/tags/*
-          echo highest=$(git tag | grep -E "^v?([0-9]+\.)+[0-9]+$" | sort -r -V | head -n1) >> $GITHUB_OUTPUT
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
+          highest=$(git tag | grep -E "^v?([0-9]+\.)+[0-9]+$" | sort -r -V | head -n1)
+          if [ "${{ steps.tagName.outputs.tag }}" = "$highest" ]; then
+            echo is_highest=true >> $GITHUB_OUTPUT
+          else
+            echo is_highest=false >> $GITHUB_OUTPUT
+          fi
+
+  build:
+    needs: prepare
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
       - name: Docker login
         run: echo ${{ secrets.DOCKER_PASSWORD }} | docker login -u ${{ secrets.DOCKER_USER }} --password-stdin
-      - name: Get tag
-        uses: little-core-labs/get-git-tag@v3.0.2
-        id: tagName
-      - name: Make release
-        run: make release
+      - name: Build and push image
+        run: make docker-push-arch
         env:
-          TAG: ${{ steps.tagName.outputs.tag }}
-          IMAGE_TAG: ${{ steps.tagName.outputs.tag }}
-      - name: Push latest
-        if: steps.tagName.outputs.tag == steps.highestTag.outputs.highest
-        run: make release
+          ARCH: ${{ matrix.arch }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
+
+  manifest:
+    needs: [prepare, build]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+      - name: Docker login
+        run: echo ${{ secrets.DOCKER_PASSWORD }} | docker login -u ${{ secrets.DOCKER_USER }} --password-stdin
+      - name: Create version manifest
+        run: make docker-manifest
         env:
-          TAG: ${{ steps.tagName.outputs.tag }}
-          IMAGE_TAG: latest
+          IMAGE_TAG: ${{ needs.prepare.outputs.tag }}
+      - name: Create latest manifest
+        if: needs.prepare.outputs.is_highest == 'true'
+        run: make docker-manifest IMAGE_TAG=latest SOURCE_TAG=${{ needs.prepare.outputs.tag }}
