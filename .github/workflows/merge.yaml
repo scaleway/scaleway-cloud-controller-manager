@@ -40,7 +40,13 @@ jobs:
         env:
           ARCH: ${{ matrix.arch }}
           TAG: ${{ github.sha }}
-          IMAGE_TAG: ${{ needs.prepare.outputs.branch }}
+      - name: Upload digest
+        uses: actions/upload-artifact@v7
+        with:
+          name: digests-${{ matrix.arch }}
+          path: digests/*
+          if-no-files-found: error
+          retention-days: 1
 
   manifest:
     needs: [prepare, build]
@@ -48,6 +54,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+      - name: Download digests
+        uses: actions/download-artifact@v8
+        with:
+          path: digests
+          pattern: digests-*
+          merge-multiple: true
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
       - name: Docker login
