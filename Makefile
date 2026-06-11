@@ -12,7 +12,6 @@ FULL_IMAGE ?= $(REGISTRY)/$(IMAGE)
 
 TAG ?= $(shell git rev-parse HEAD)
 IMAGE_TAG ?= $(shell git rev-parse HEAD)
-SOURCE_TAG ?= $(IMAGE_TAG)
 COMMIT_SHA ?= $(shell git rev-parse HEAD)
 
 DOCKER_CLI_EXPERIMENTAL ?= enabled
@@ -44,12 +43,16 @@ docker-build:
 .PHONY: docker-push-arch
 docker-push-arch:
 	@echo "Building and pushing scaleway-cloud-controller-manager for $(ARCH)"
-	docker buildx build . --platform=linux/$(ARCH) --build-arg TAG=$(TAG) --build-arg COMMIT_SHA=$(COMMIT_SHA) --build-arg BUILD_DATE=$(BUILD_DATE) --push -t $(FULL_IMAGE):$(IMAGE_TAG)-$(ARCH)
+	mkdir -p digests
+	docker buildx build . --platform=linux/$(ARCH) --build-arg TAG=$(TAG) --build-arg COMMIT_SHA=$(COMMIT_SHA) --build-arg BUILD_DATE=$(BUILD_DATE) \
+		--output type=image,name=$(FULL_IMAGE),push=true,push-by-digest=true,name-canonical=true \
+		--metadata-file digests/$(ARCH).json
+	jq -r '."containerimage.digest"' digests/$(ARCH).json > digests/$(ARCH)
 
 .PHONY: docker-manifest
 docker-manifest:
-	@echo "Creating manifest $(FULL_IMAGE):$(IMAGE_TAG) from $(foreach arch,$(ARCHS),$(FULL_IMAGE):$(SOURCE_TAG)-$(arch))"
-	docker buildx imagetools create -t $(FULL_IMAGE):$(IMAGE_TAG) $(foreach arch,$(ARCHS),$(FULL_IMAGE):$(SOURCE_TAG)-$(arch))
+	@echo "Creating manifest $(FULL_IMAGE):$(IMAGE_TAG) from $(foreach arch,$(ARCHS),digests/$(arch))"
+	docker buildx imagetools create -t $(FULL_IMAGE):$(IMAGE_TAG) $(foreach arch,$(ARCHS),$(FULL_IMAGE)@$(shell cat digests/$(arch)))
 
 .PHONY: docker-push-all
 docker-push-all:
