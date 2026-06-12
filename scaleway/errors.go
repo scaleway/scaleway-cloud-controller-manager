@@ -19,13 +19,17 @@ package scaleway
 import "errors"
 
 var (
-	BadProviderID          = errors.New("provider ID wrong format: format should be scaleway://product/region/0788e6f4-55b0-42e2-936f-d0c5ecd49a13")
-	InstanceDuplicated     = errors.New("duplicated instance results")
-	IPAddressNotFound      = errors.New("ip address not found")
-	IPAddressInUse         = errors.New("ip address already in use")
-	LoadBalancerNotFound   = errors.New("loadbalancer not found")
-	LoadBalancerDuplicated = errors.New("loadbalancer duplicated")
-	LoadBalancerNotReady   = errors.New("loadbalancer is not ready")
+	BadProviderID            = errors.New("provider ID wrong format: format should be scaleway://product/region/0788e6f4-55b0-42e2-936f-d0c5ecd49a13")
+	InstanceDuplicated       = errors.New("duplicated instance results")
+	IPAddressNotFound        = errors.New("ip address not found")
+	IPAddressInUse           = errors.New("ip address already in use")
+	LoadBalancerNotFound     = errors.New("loadbalancer not found")
+	LoadBalancerDuplicated   = errors.New("loadbalancer duplicated")
+	LoadBalancerNotReady     = errors.New("loadbalancer is not ready")
+	PrivateNetworkNotFound   = errors.New("private network not found")
+	PrivateNetworkDuplicated = errors.New("multiple private networks found with same name")
+	VPCNotFound              = errors.New("VPC not found")
+	VPCDuplicated            = errors.New("multiple VPCs found with same name")
 
 	errLoadBalancerInvalidAnnotation     = errors.New("load balancer invalid annotation")
 	errLoadBalancerInvalidLoadBalancerID = errors.New("load balancer invalid loadbalancer-id annotation")
