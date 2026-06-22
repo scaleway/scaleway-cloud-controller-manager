@@ -13,7 +13,7 @@ jobs:
     steps:
     # Checkout should always be before setup-go to ensure caching is working
     - name: checkout
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
     - name: Install Go
       uses: actions/setup-go@v6
       with:
@@ -30,7 +30,7 @@ jobs:
     steps:
     # Checkout should always be before setup-go to ensure caching is working
     - name: checkout
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
     - name: Install Go
       uses: actions/setup-go@v6
       with:
