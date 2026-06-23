@@ -18,14 +18,15 @@ package scaleway
 
 import (
 	"fmt"
+	"maps"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/scaleway/scaleway-sdk-go/api/instance/v1"
 	"github.com/scaleway/scaleway-sdk-go/api/lb/v1"
 	"github.com/scaleway/scaleway-sdk-go/scw"
-	"golang.org/x/exp/maps"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/runtime"
@@ -259,7 +260,7 @@ func (s *syncController) syncNodeTags(node *v1.Node) error {
 		}
 	}
 
-	nodeCopied.Spec.Taints = maps.Values(nodeTaints)
+	nodeCopied.Spec.Taints = slices.Collect(maps.Values(nodeTaints))
 	err = patcher.Patch()
 	if err != nil {
 		klog.Errorf("error patching service: %v", err)

@@ -3,13 +3,14 @@ package scaleway
 import (
 	"fmt"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
-	"golang.org/x/exp/slices"
 	"google.golang.org/protobuf/types/known/durationpb"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/ptr"
 
@@ -212,7 +213,7 @@ const (
 	// This annotation requires `service.beta.kubernetes.io/scw-loadbalancer-id` to be set to a valid existing LB.
 	serviceAnnotationLoadBalancerExternallyManaged = "service.beta.kubernetes.io/scw-loadbalancer-externally-managed"
 
-	// serviceAnnotationLoadBalancerIPIDs is the annotation to statically set the IPs of the loadbalancer.
+	// serviceAnnotationLoadBalancerIPIDs is the annotation to statically set the public IPs of the loadbalancer.
 	// It is possible to provide a single IP ID, or a comma delimited list of IP IDs.
 	// You can provide at most one IPv4 and one IPv6. You must set at least one IPv4.
 	// This annotation takes priority over the deprecated spec.loadBalancerIP field.
@@ -221,6 +222,14 @@ const (
 	// "<ip-id>": will attach a single IP to the LB.
 	// "<ip-id>,<ip-id>": will attach the two IPs to the LB.
 	serviceAnnotationLoadBalancerIPIDs = "service.beta.kubernetes.io/scw-loadbalancer-ip-ids"
+
+	// serviceAnnotationLoadBalancerPrivateIPIDs is the annotation to statically set the private IPs of the loadbalancer.
+	// It is possible to provide a single IPAM IP ID, or a comma delimited list of IPAM IP IDs.
+	// Changing the IPs will result in the re-creation of the Private Network attachments.
+	// The possible formats are:
+	// "<ip-id>": will attach a single IP to the LB.
+	// "<ip-id>,<ip-id>": will attach the two IPs to the LB.
+	serviceAnnotationLoadBalancerPrivateIPIDs = "service.beta.kubernetes.io/scw-loadbalancer-private-ip-ids"
 
 	// serviceAnnotationLoadBalancerIPMode is the annotation to manually set the
 	// .status.loadBalancer.ingress.ipMode field of the service. The accepted values
@@ -316,6 +325,15 @@ func getIPIDs(service *v1.Service) []string {
 	}
 
 	return strings.Split(ipIDs, ",")
+}
+
+func getPrivateIPIDs(service *v1.Service) sets.Set[string] {
+	privateIPIDs := service.Annotations[serviceAnnotationLoadBalancerPrivateIPIDs]
+	if privateIPIDs == "" {
+		return nil
+	}
+
+	return sets.New(strings.Split(privateIPIDs, ",")...)
 }
 
 func getPrivateNetworkIDs(service *v1.Service) []string {

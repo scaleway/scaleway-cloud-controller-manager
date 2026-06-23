@@ -20,14 +20,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"os"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
-	"golang.org/x/exp/slices"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/cloud-provider/api"
 	"k8s.io/klog/v2"
@@ -822,20 +823,27 @@ func (l *loadbalancers) attachPrivateNetworks(loadbalancer *scwlb.LB, service *v
 		return nil
 	}
 
-	// maps pnID => attached
-	pnIDs := make(map[string]bool)
+	type privateNetworkStatus struct {
+		attached      bool
+		attachedIPIDs []string
+		desiredIPIDs  []string
+	}
+
+	// maps pnID => status
+	privateNetworkAttachments := make(map[string]privateNetworkStatus)
 
 	// Fetch user-specified PrivateNetworkIDs unless LB is externally managed.
 	if !lbExternallyManaged {
 		for _, pnID := range getPrivateNetworkIDs(service) {
-			pnIDs[pnID] = false
+			privateNetworkAttachments[pnID] = privateNetworkStatus{}
 		}
 	}
 
-	if len(pnIDs) == 0 {
-		pnIDs[l.pnID] = false
+	if len(privateNetworkAttachments) == 0 {
+		privateNetworkAttachments[l.pnID] = privateNetworkStatus{}
 	}
 
+	// Find which Private Networks are currently attached or need to be detached.
 	respPN, err := l.api.ListLBPrivateNetworks(&scwlb.ZonedAPIListLBPrivateNetworksRequest{
 		Zone: loadbalancer.Zone,
 		LBID: loadbalancer.ID,
@@ -845,9 +853,11 @@ func (l *loadbalancers) attachPrivateNetworks(loadbalancer *scwlb.LB, service *v
 	}
 
 	for _, pNIC := range respPN.PrivateNetwork {
-		if _, ok := pnIDs[pNIC.PrivateNetworkID]; ok {
+		if pnStatus, ok := privateNetworkAttachments[pNIC.PrivateNetworkID]; ok {
 			// Mark this Private Network as attached.
-			pnIDs[pNIC.PrivateNetworkID] = true
+			pnStatus.attached = true
+			pnStatus.attachedIPIDs = pNIC.IpamIDs
+			privateNetworkAttachments[pNIC.PrivateNetworkID] = pnStatus
 			continue
 		}
 
@@ -865,9 +875,65 @@ func (l *loadbalancers) attachPrivateNetworks(loadbalancer *scwlb.LB, service *v
 		}
 	}
 
-	for pnID, attached := range pnIDs {
-		if attached {
-			continue
+	// Resolve desired IPAM IDs per PN: match already-attached IPs first to avoid IPAM calls,
+	// then query IPAM per PN for any remaining IDs.
+	privateIPIDs := getPrivateIPIDs(service)
+	for pnID, pnStatus := range privateNetworkAttachments {
+		for _, ipID := range pnStatus.attachedIPIDs {
+			if _, ok := privateIPIDs[ipID]; ok {
+				pnStatus.desiredIPIDs = append(pnStatus.desiredIPIDs, ipID)
+				delete(privateIPIDs, ipID)
+			}
+		}
+		privateNetworkAttachments[pnID] = pnStatus
+	}
+
+	if len(privateIPIDs) > 0 {
+		region, err := loadbalancer.Zone.Region()
+		if err != nil {
+			return fmt.Errorf("error getting region for load balancer %s: %v", loadbalancer.ID, err)
+		}
+
+		for pnID, pnStatus := range privateNetworkAttachments {
+			resp, err := l.ipam.ListIPs(&scwipam.ListIPsRequest{
+				Region:           region,
+				PrivateNetworkID: &pnID,
+				IPIDs:            slices.Collect(maps.Keys(privateIPIDs)),
+			})
+			if err != nil {
+				return fmt.Errorf("failed to list IPs for private network %s: %w", pnID, err)
+			}
+
+			for _, ip := range resp.IPs {
+				if _, ok := privateIPIDs[ip.ID]; ok {
+					pnStatus.desiredIPIDs = append(pnStatus.desiredIPIDs, ip.ID)
+					delete(privateIPIDs, ip.ID)
+				}
+			}
+
+			privateNetworkAttachments[pnID] = pnStatus
+		}
+
+		if len(privateIPIDs) > 0 {
+			return fmt.Errorf("ips %s were not found in any configured private network", strings.Join(slices.Collect(maps.Keys(privateIPIDs)), ", "))
+		}
+	}
+
+	// Reconcile: skip already-correct attachments, detach+reattach if IPs changed, attach if missing.
+	for pnID, pnStatus := range privateNetworkAttachments {
+		if pnStatus.attached {
+			if len(pnStatus.desiredIPIDs) == 0 || slices.Equal(slices.Sorted(slices.Values(pnStatus.attachedIPIDs)), slices.Sorted(slices.Values(pnStatus.desiredIPIDs))) {
+				continue
+			}
+
+			klog.V(3).Infof("private network %s must be reattached to load balancer %s", pnID, loadbalancer.ID)
+			if err := l.api.DetachPrivateNetwork(&scwlb.ZonedAPIDetachPrivateNetworkRequest{
+				Zone:             loadbalancer.Zone,
+				LBID:             loadbalancer.ID,
+				PrivateNetworkID: pnID,
+			}); err != nil {
+				return fmt.Errorf("unable to detach private network %s on %s: %w", pnID, loadbalancer.ID, err)
+			}
 		}
 
 		klog.V(3).Infof("attach private network %s to load balancer %s", pnID, loadbalancer.ID)
@@ -875,7 +941,7 @@ func (l *loadbalancers) attachPrivateNetworks(loadbalancer *scwlb.LB, service *v
 			Zone:             loadbalancer.Zone,
 			LBID:             loadbalancer.ID,
 			PrivateNetworkID: pnID,
-			DHCPConfig:       &scwlb.PrivateNetworkDHCPConfig{},
+			IpamIDs:          pnStatus.desiredIPIDs,
 		})
 		if err != nil {
 			return fmt.Errorf("unable to attach private network %s on %s: %v", pnID, loadbalancer.ID, err)

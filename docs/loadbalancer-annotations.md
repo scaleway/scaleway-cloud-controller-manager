@@ -229,6 +229,15 @@ The possible formats are:
 - `<ip-id>`: will attach a single IP to the LB.
 - `<ip-id>,<ip-id>`: will attach the two IPs to the LB.
 
+### `service.beta.kubernetes.io/scw-loadbalancer-private-ip-ids`
+
+This is the annotation to statically set the private IPs of the loadbalancer.
+It is possible to provide a single IPAM IP ID, or a comma delimited list of IPAM IP IDs.
+Changing the IPs will result in the re-creation of the Private Network attachments.
+The possible formats are:
+- `<ip-id>`: will attach a single IP to the LB.
+- `<ip-id>,<ip-id>`: will attach the two IPs to the LB.
+
 ### `service.beta.kubernetes.io/scw-loadbalancer-ip-mode`
 
 This is the annotation to manually set the `.status.loadBalancer.ingress.ipMode` field of the service.
