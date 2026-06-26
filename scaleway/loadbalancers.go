@@ -921,6 +921,10 @@ func (l *loadbalancers) attachPrivateNetworks(loadbalancer *scwlb.LB, service *v
 
 	// Reconcile: skip already-correct attachments, detach+reattach if IPs changed, attach if missing.
 	for pnID, pnStatus := range privateNetworkAttachments {
+		if len(pnStatus.desiredIPIDs) > 1 {
+			return fmt.Errorf("at most one IP can be set per private network, please choose one between %s", pnStatus.desiredIPIDs)
+		}
+
 		if pnStatus.attached {
 			if len(pnStatus.desiredIPIDs) == 0 || slices.Equal(slices.Sorted(slices.Values(pnStatus.attachedIPIDs)), slices.Sorted(slices.Values(pnStatus.desiredIPIDs))) {
 				continue

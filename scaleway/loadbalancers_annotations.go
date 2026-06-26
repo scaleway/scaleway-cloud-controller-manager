@@ -225,6 +225,8 @@ const (
 
 	// serviceAnnotationLoadBalancerPrivateIPIDs is the annotation to statically set the private IPs of the loadbalancer.
 	// It is possible to provide a single IPAM IP ID, or a comma delimited list of IPAM IP IDs.
+	// Each IPAM IP ID will automatically be assigned to the appropriate Private Network attachment.
+	// Please note that there can be at most one IP address (IPv4 or IPv6) per Private Network.
 	// Changing the IPs will result in the re-creation of the Private Network attachments.
 	// The possible formats are:
 	// "<ip-id>": will attach a single IP to the LB.
