@@ -754,26 +754,13 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 
 		svcAcls := makeACLSpecs(service, nodes, frontend)
 		if !aclsEquals(aclsResp.ACLs, svcAcls) {
-			// Replace ACLs
-			klog.Infof("remove all ACLs from frontend: %s port: %d loadbalancer: %s", frontend.ID, frontend.InboundPort, loadbalancer.ID)
-			for _, acl := range aclsResp.ACLs {
-				if err := l.api.DeleteACL(&scwlb.ZonedAPIDeleteACLRequest{
-					Zone:  loadbalancer.Zone,
-					ACLID: acl.ID,
-				}); err != nil {
-					return fmt.Errorf("failed removing ACL %s from frontend: %s port: %d loadbalancer: %s err: %v", acl.Name, frontend.ID, frontend.InboundPort, loadbalancer.ID, err)
-				}
-			}
-
-			klog.Infof("create all ACLs for frontend: %s port: %d loadbalancer: %s", frontend.ID, frontend.InboundPort, loadbalancer.ID)
-			for _, acl := range svcAcls {
-				if _, err := l.api.SetACLs(&scwlb.ZonedAPISetACLsRequest{
-					Zone:       loadbalancer.Zone,
-					FrontendID: frontend.ID,
-					ACLs:       svcAcls,
-				}); err != nil {
-					return fmt.Errorf("failed creating ACL %s for frontend: %s port: %d loadbalancer: %s err: %v", acl.Name, frontend.ID, frontend.InboundPort, loadbalancer.ID, err)
-				}
+			klog.Infof("replace ACLs from frontend: %s port: %d loadbalancer: %s", frontend.ID, frontend.InboundPort, loadbalancer.ID)
+			if _, err := l.api.SetACLs(&scwlb.ZonedAPISetACLsRequest{
+				Zone:       loadbalancer.Zone,
+				FrontendID: frontend.ID,
+				ACLs:       svcAcls,
+			}, scw.WithContext(ctx)); err != nil {
+				return fmt.Errorf("failed replacing ACLs for frontend: %s port: %d loadbalancer: %s err: %v", frontend.ID, frontend.InboundPort, loadbalancer.ID, err)
 			}
 		}
 	}
