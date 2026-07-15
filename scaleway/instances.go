@@ -18,6 +18,7 @@ package scaleway
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	scwinstance "github.com/scaleway/scaleway-sdk-go/api/instance/v1"
@@ -54,27 +55,27 @@ func newInstances(client *client, pnID string) *instances {
 
 // NodeAddresses returns the addresses of the specified instance.
 func (i *instances) NodeAddresses(ctx context.Context, name types.NodeName) ([]v1.NodeAddress, error) {
-	server, err := i.getServerByName(string(name))
+	server, err := i.getServerByName(ctx, string(name))
 	if err != nil {
 		return nil, err
 	}
-	return i.instanceAddresses(server)
+	return i.instanceAddresses(ctx, server)
 }
 
 // NodeAddressesByProviderID returns the addresses of the specified instance.
 // The instance is specified using the providerID of the node.
 func (i *instances) NodeAddressesByProviderID(ctx context.Context, providerID string) ([]v1.NodeAddress, error) {
-	instanceServer, err := i.getServerByProviderID(providerID)
+	instanceServer, err := i.getServerByProviderID(ctx, providerID)
 	if err != nil {
 		return nil, err
 	}
-	return i.instanceAddresses(instanceServer)
+	return i.instanceAddresses(ctx, instanceServer)
 }
 
 // InstanceID returns the cloud provider ID of the node with the specified NodeName.
 // Note that if the instance does not exist, we must return ("", cloudprovider.InstanceNotFound)
 func (i *instances) InstanceID(ctx context.Context, name types.NodeName) (string, error) {
-	instanceServer, err := i.getServerByName(string(name))
+	instanceServer, err := i.getServerByName(ctx, string(name))
 	if err != nil {
 		return "", err
 	}
@@ -83,7 +84,7 @@ func (i *instances) InstanceID(ctx context.Context, name types.NodeName) (string
 
 // InstanceType returns the type of the specified instance (ex. DEV1-M, GP1-XS,...).
 func (i *instances) InstanceType(ctx context.Context, name types.NodeName) (string, error) {
-	instanceServer, err := i.getServerByName(string(name))
+	instanceServer, err := i.getServerByName(ctx, string(name))
 	if err != nil {
 		return "", err
 	}
@@ -92,7 +93,7 @@ func (i *instances) InstanceType(ctx context.Context, name types.NodeName) (stri
 
 // InstanceTypeByProviderID returns the type of the specified instance (ex. DEV1-M, GP1-XS,...).
 func (i *instances) InstanceTypeByProviderID(ctx context.Context, providerID string) (string, error) {
-	instanceServer, err := i.getServerByProviderID(providerID)
+	instanceServer, err := i.getServerByProviderID(ctx, providerID)
 	if err != nil {
 		return "", err
 	}
@@ -100,14 +101,14 @@ func (i *instances) InstanceTypeByProviderID(ctx context.Context, providerID str
 }
 
 // return the machine's hostname
-func (i *instances) CurrentNodeName(ctx context.Context, hostname string) (types.NodeName, error) {
+func (i *instances) CurrentNodeName(_ context.Context, hostname string) (types.NodeName, error) {
 	return types.NodeName(hostname), nil
 }
 
 func (i *instances) InstanceExistsByProviderID(ctx context.Context, providerID string) (bool, error) {
-	_, err := i.getServerByProviderID(providerID)
+	_, err := i.getServerByProviderID(ctx, providerID)
 	if err != nil {
-		if err == cloudprovider.InstanceNotFound {
+		if errors.Is(err, cloudprovider.InstanceNotFound) {
 			return false, nil
 		}
 		return false, err
@@ -117,7 +118,7 @@ func (i *instances) InstanceExistsByProviderID(ctx context.Context, providerID s
 
 // InstanceShutdownByProviderID returns true if the instance is shutdown in cloudprovider
 func (i *instances) InstanceShutdownByProviderID(ctx context.Context, providerID string) (bool, error) {
-	instanceServer, err := i.getServerByProviderID(providerID)
+	instanceServer, err := i.getServerByProviderID(ctx, providerID)
 	if err != nil {
 		return false, err
 	}
@@ -139,7 +140,7 @@ func (i *instances) AddSSHKeyToAllInstances(ctx context.Context, user string, ke
 // This method is particularly used in the context of external cloud providers where node initialization must be done
 // outside the kubelets.
 func (i *instances) GetZoneByProviderID(ctx context.Context, providerID string) (cloudprovider.Zone, error) {
-	instanceServer, err := i.getServerByProviderID(providerID)
+	instanceServer, err := i.getServerByProviderID(ctx, providerID)
 	if err != nil {
 		return cloudprovider.Zone{Region: "", FailureDomain: ""}, err
 	}
@@ -151,7 +152,7 @@ func (i *instances) GetZoneByProviderID(ctx context.Context, providerID string) 
 // This method is particularly used in the context of external cloud providers where node initialization must be done
 // outside the kubelets.
 func (i *instances) GetZoneByNodeName(ctx context.Context, nodeName types.NodeName) (cloudprovider.Zone, error) {
-	instanceServer, err := i.getServerByName(string(nodeName))
+	instanceServer, err := i.getServerByName(ctx, string(nodeName))
 	if err != nil {
 		return cloudprovider.Zone{Region: "", FailureDomain: ""}, err
 	}
@@ -160,8 +161,8 @@ func (i *instances) GetZoneByNodeName(ctx context.Context, nodeName types.NodeNa
 
 // ===========================
 
-// instanceAddresses extracts NodeAdress from the server
-func (i *instances) instanceAddresses(server *scwinstance.Server) ([]v1.NodeAddress, error) {
+// instanceAddresses extracts NodeAddress from the server
+func (i *instances) instanceAddresses(ctx context.Context, server *scwinstance.Server) ([]v1.NodeAddress, error) {
 	addresses := []v1.NodeAddress{
 		{Type: v1.NodeHostName, Address: server.Hostname},
 	}
@@ -179,7 +180,7 @@ func (i *instances) instanceAddresses(server *scwinstance.Server) ([]v1.NodeAddr
 	}
 
 	// Try to get private network IPs
-	privateAddresses, err := i.getPrivateNetworkAddresses(server)
+	privateAddresses, err := i.getPrivateNetworkAddresses(ctx, server)
 	if err != nil {
 		klog.Warningf("failed to get private network addresses for node %s: %v", server.Name, err)
 		return nil, fmt.Errorf("failed to get private network addresses for node %s: %w", server.Name, err)
@@ -205,7 +206,7 @@ func (i *instances) instanceAddresses(server *scwinstance.Server) ([]v1.NodeAddr
 // getPrivateNetworkAddresses returns private network IPs for the server.
 // If pnID is configured, it only looks up IPs for that specific private network.
 // If pnID is not configured, it iterates through all private NICs and returns all found IPs.
-func (i *instances) getPrivateNetworkAddresses(server *scwinstance.Server) ([]v1.NodeAddress, error) {
+func (i *instances) getPrivateNetworkAddresses(ctx context.Context, server *scwinstance.Server) ([]v1.NodeAddress, error) {
 	if len(server.PrivateNics) == 0 {
 		return nil, nil
 	}
@@ -221,7 +222,7 @@ func (i *instances) getPrivateNetworkAddresses(server *scwinstance.Server) ([]v1
 	if i.pnID != "" {
 		for _, pNIC := range server.PrivateNics {
 			if pNIC.PrivateNetworkID == i.pnID {
-				nicAddresses, err := i.getIPsForPrivateNIC(server, pNIC, region)
+				nicAddresses, err := i.getIPsForPrivateNIC(ctx, server, pNIC, region)
 				if err != nil {
 					return nil, err
 				}
@@ -234,7 +235,7 @@ func (i *instances) getPrivateNetworkAddresses(server *scwinstance.Server) ([]v1
 
 	// No specific pnID configured - iterate through all private NICs
 	for _, pNIC := range server.PrivateNics {
-		nicAddresses, err := i.getIPsForPrivateNIC(server, pNIC, region)
+		nicAddresses, err := i.getIPsForPrivateNIC(ctx, server, pNIC, region)
 		if err != nil {
 			klog.Warningf("failed to query IPAM for node %s: %v", server.Name, err)
 			return addresses, fmt.Errorf("failed to query IPAM for node %s: %w", server.Name, err)
@@ -246,14 +247,14 @@ func (i *instances) getPrivateNetworkAddresses(server *scwinstance.Server) ([]v1
 }
 
 // getIPsForPrivateNIC queries IPAM for IPs assigned to a specific private NIC
-func (i *instances) getIPsForPrivateNIC(server *scwinstance.Server, pNIC *scwinstance.PrivateNIC, region scw.Region) ([]v1.NodeAddress, error) {
+func (i *instances) getIPsForPrivateNIC(ctx context.Context, server *scwinstance.Server, pNIC *scwinstance.PrivateNIC, region scw.Region) ([]v1.NodeAddress, error) {
 	ips, err := i.ipam.ListIPs(&scwipam.ListIPsRequest{
 		ProjectID:    &server.Project,
 		ResourceType: scwipam.ResourceTypeInstancePrivateNic,
 		ResourceID:   &pNIC.ID,
 		IsIPv6:       scw.BoolPtr(false),
 		Region:       region,
-	})
+	}, scw.WithContext(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("unable to query ipam for node %s NIC %s: %v", server.Name, pNIC.ID, err)
 	}
@@ -282,7 +283,7 @@ func instanceZone(instanceServer *scwinstance.Server) (cloudprovider.Zone, error
 
 // getServerByName returns a *instance.Server matching a name
 // it must match the exact name
-func (i *instances) getServerByName(name string) (*scwinstance.Server, error) {
+func (i *instances) getServerByName(ctx context.Context, name string) (*scwinstance.Server, error) {
 	if name == "" {
 		return nil, cloudprovider.InstanceNotFound
 	}
@@ -293,7 +294,7 @@ func (i *instances) getServerByName(name string) (*scwinstance.Server, error) {
 		resp, err := i.api.ListServers(&scwinstance.ListServersRequest{
 			Zone: zoneReq,
 			Name: &name,
-		}, scw.WithAllPages())
+		}, scw.WithAllPages(), scw.WithContext(ctx))
 
 		if err != nil {
 			if is404Error(err) {
@@ -324,7 +325,7 @@ func (i *instances) getServerByName(name string) (*scwinstance.Server, error) {
 
 // getServerByProviderID returns a *instance,Server matching the given uuid and in the specified zone
 // if the zone is empty, it will try all the zones
-func (i *instances) getServerByProviderID(providerID string) (*scwinstance.Server, error) {
+func (i *instances) getServerByProviderID(ctx context.Context, providerID string) (*scwinstance.Server, error) {
 	_, zone, id, err := ServerInfoFromProviderID(providerID)
 	if err != nil {
 		return nil, err
@@ -333,7 +334,7 @@ func (i *instances) getServerByProviderID(providerID string) (*scwinstance.Serve
 	resp, err := i.api.GetServer(&scwinstance.GetServerRequest{
 		ServerID: id,
 		Zone:     scw.Zone(zone),
-	})
+	}, scw.WithContext(ctx))
 	if err != nil {
 		if is404Error(err) {
 			return nil, cloudprovider.InstanceNotFound
@@ -352,9 +353,9 @@ func (i *instances) InstanceExists(ctx context.Context, node *v1.Node) (bool, er
 	var err error
 
 	if node.Spec.ProviderID == "" {
-		_, err = i.getServerByName(node.Name)
+		_, err = i.getServerByName(ctx, node.Name)
 	} else {
-		_, err = i.getServerByProviderID(node.Spec.ProviderID)
+		_, err = i.getServerByProviderID(ctx, node.Spec.ProviderID)
 	}
 
 	if err == cloudprovider.InstanceNotFound {
@@ -374,9 +375,9 @@ func (i *instances) InstanceShutdown(ctx context.Context, node *v1.Node) (bool, 
 	var err error
 
 	if node.Spec.ProviderID == "" {
-		instance, err = i.getServerByName(node.Name)
+		instance, err = i.getServerByName(ctx, node.Name)
 	} else {
-		instance, err = i.getServerByProviderID(node.Spec.ProviderID)
+		instance, err = i.getServerByProviderID(ctx, node.Spec.ProviderID)
 	}
 
 	if err != nil {
@@ -399,9 +400,9 @@ func (i *instances) InstanceMetadata(ctx context.Context, node *v1.Node) (*cloud
 	var err error
 
 	if node.Spec.ProviderID == "" {
-		instance, err = i.getServerByName(node.Name)
+		instance, err = i.getServerByName(ctx, node.Name)
 	} else {
-		instance, err = i.getServerByProviderID(node.Spec.ProviderID)
+		instance, err = i.getServerByProviderID(ctx, node.Spec.ProviderID)
 	}
 
 	if err != nil {
@@ -413,7 +414,7 @@ func (i *instances) InstanceMetadata(ctx context.Context, node *v1.Node) (*cloud
 		return nil, err
 	}
 
-	addresses, err := i.instanceAddresses(instance)
+	addresses, err := i.instanceAddresses(ctx, instance)
 	if err != nil {
 		return nil, err
 	}

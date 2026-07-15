@@ -45,7 +45,7 @@ func newBaremetal(client *client) *baremetal {
 
 // NodeAddresses returns the addresses of the specified instance.
 func (b *baremetal) NodeAddresses(ctx context.Context, name types.NodeName) ([]v1.NodeAddress, error) {
-	baremetalServer, err := b.getServerByName(string(name))
+	baremetalServer, err := b.getServerByName(ctx, string(name))
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +55,7 @@ func (b *baremetal) NodeAddresses(ctx context.Context, name types.NodeName) ([]v
 // NodeAddressesByProviderID returns the addresses of the specified instance.
 // The instance is specified using the providerID of the node.
 func (b *baremetal) NodeAddressesByProviderID(ctx context.Context, providerID string) ([]v1.NodeAddress, error) {
-	baremetalServer, err := b.getServerByProviderID(providerID)
+	baremetalServer, err := b.getServerByProviderID(ctx, providerID)
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +65,7 @@ func (b *baremetal) NodeAddressesByProviderID(ctx context.Context, providerID st
 // InstanceID returns the cloud provider ID of the node with the specified NodeName.
 // Note that if the instance does not exist, we must return ("", cloudprovider.InstanceNotFound)
 func (b *baremetal) InstanceID(ctx context.Context, nodeName types.NodeName) (string, error) {
-	baremetalServer, err := b.getServerByName(string(nodeName))
+	baremetalServer, err := b.getServerByName(ctx, string(nodeName))
 	if err != nil {
 		return "", err
 	}
@@ -74,20 +74,20 @@ func (b *baremetal) InstanceID(ctx context.Context, nodeName types.NodeName) (st
 
 // InstanceType returns the type of the specified instance.
 func (b *baremetal) InstanceType(ctx context.Context, name types.NodeName) (string, error) {
-	baremetalServer, err := b.getServerByName(string(name))
+	baremetalServer, err := b.getServerByName(ctx, string(name))
 	if err != nil {
 		return "", err
 	}
-	return b.getServerOfferName(baremetalServer)
+	return b.getServerOfferName(ctx, baremetalServer)
 }
 
 // InstanceTypeByProviderID returns the type of the specified instance (ex. GP-BM1-M, HC-BM1-S,...).
 func (b *baremetal) InstanceTypeByProviderID(ctx context.Context, providerID string) (string, error) {
-	baremetalServer, err := b.getServerByProviderID(providerID)
+	baremetalServer, err := b.getServerByProviderID(ctx, providerID)
 	if err != nil {
 		return "", err
 	}
-	return b.getServerOfferName(baremetalServer)
+	return b.getServerOfferName(ctx, baremetalServer)
 }
 
 // AddSSHKeyToAllInstances adds an SSH public key as a legal identity for all instances
@@ -106,7 +106,7 @@ func (b *baremetal) CurrentNodeName(ctx context.Context, hostname string) (types
 // If false is returned with no error, the instance will be immediately deleted by the cloud controller manager.
 // This method should still return true for instances that exist but are stopped/sleeping.
 func (b *baremetal) InstanceExistsByProviderID(ctx context.Context, providerID string) (bool, error) {
-	_, err := b.getServerByProviderID(providerID)
+	_, err := b.getServerByProviderID(ctx, providerID)
 	if err != nil {
 		if err == cloudprovider.InstanceNotFound {
 			return false, nil
@@ -118,7 +118,7 @@ func (b *baremetal) InstanceExistsByProviderID(ctx context.Context, providerID s
 
 // InstanceShutdownByProviderID returns true if the instance is shutdown in cloudprovider
 func (b *baremetal) InstanceShutdownByProviderID(ctx context.Context, providerID string) (bool, error) {
-	baremetalServer, err := b.getServerByProviderID(providerID)
+	baremetalServer, err := b.getServerByProviderID(ctx, providerID)
 	if err != nil {
 		return false, err
 	}
@@ -134,7 +134,7 @@ func (b *baremetal) InstanceShutdownByProviderID(ctx context.Context, providerID
 // This method is particularly used in the context of external cloud providers where node initialization must be done
 // outside the kubelets.
 func (b *baremetal) GetZoneByProviderID(ctx context.Context, providerID string) (cloudprovider.Zone, error) {
-	baremetalServer, err := b.getServerByProviderID(providerID)
+	baremetalServer, err := b.getServerByProviderID(ctx, providerID)
 	if err != nil {
 		return cloudprovider.Zone{Region: "", FailureDomain: ""}, err
 	}
@@ -145,7 +145,7 @@ func (b *baremetal) GetZoneByProviderID(ctx context.Context, providerID string) 
 // This method is particularly used in the context of external cloud providers where node initialization must be done
 // outside the kubelets.
 func (b *baremetal) GetZoneByNodeName(ctx context.Context, nodeName types.NodeName) (cloudprovider.Zone, error) {
-	baremetalServer, err := b.getServerByName(string(nodeName))
+	baremetalServer, err := b.getServerByName(ctx, string(nodeName))
 	if err != nil {
 		return cloudprovider.Zone{Region: "", FailureDomain: ""}, err
 	}
@@ -184,11 +184,11 @@ func baremetalZone(server *scwbaremetal.Server) (cloudprovider.Zone, error) {
 }
 
 // getServerOfferName returns the offer name of a baremetal server
-func (b *baremetal) getServerOfferName(server *scwbaremetal.Server) (string, error) {
+func (b *baremetal) getServerOfferName(ctx context.Context, server *scwbaremetal.Server) (string, error) {
 	offer, err := b.api.GetOffer(&scwbaremetal.GetOfferRequest{
 		OfferID: server.OfferID,
 		Zone:    server.Zone,
-	})
+	}, scw.WithContext(ctx))
 	if err != nil {
 		if is404Error(err) {
 			return "UNKNOWN", nil
@@ -201,7 +201,7 @@ func (b *baremetal) getServerOfferName(server *scwbaremetal.Server) (string, err
 
 // getServerByName returns a *instance.Server matching a name
 // it must match the exact name
-func (b *baremetal) getServerByName(name string) (*scwbaremetal.Server, error) {
+func (b *baremetal) getServerByName(ctx context.Context, name string) (*scwbaremetal.Server, error) {
 	if name == "" {
 		return nil, cloudprovider.InstanceNotFound
 	}
@@ -212,7 +212,7 @@ func (b *baremetal) getServerByName(name string) (*scwbaremetal.Server, error) {
 		resp, err := b.api.ListServers(&scwbaremetal.ListServersRequest{
 			Zone: zoneReq,
 			Name: &name,
-		}, scw.WithAllPages())
+		}, scw.WithAllPages(), scw.WithContext(ctx))
 		if err != nil {
 			if is404Error(err) {
 				continue
@@ -241,7 +241,7 @@ func (b *baremetal) getServerByName(name string) (*scwbaremetal.Server, error) {
 
 // getServerByProviderID returns a *instance,Server matchig the given uuid and in the specified zone
 // if the zone is empty, it will try all the zones
-func (b *baremetal) getServerByProviderID(providerID string) (*scwbaremetal.Server, error) {
+func (b *baremetal) getServerByProviderID(ctx context.Context, providerID string) (*scwbaremetal.Server, error) {
 	_, zone, id, err := ServerInfoFromProviderID(providerID)
 	if err != nil {
 		return nil, err
@@ -250,7 +250,7 @@ func (b *baremetal) getServerByProviderID(providerID string) (*scwbaremetal.Serv
 	server, err := b.api.GetServer(&scwbaremetal.GetServerRequest{
 		ServerID: id,
 		Zone:     scw.Zone(zone),
-	})
+	}, scw.WithContext(ctx))
 	if err != nil {
 		if is404Error(err) {
 			return nil, cloudprovider.InstanceNotFound
@@ -268,9 +268,9 @@ func (b *baremetal) InstanceExists(ctx context.Context, node *v1.Node) (bool, er
 	var err error
 
 	if node.Spec.ProviderID == "" {
-		_, err = b.getServerByName(node.Name)
+		_, err = b.getServerByName(ctx, node.Name)
 	} else {
-		_, err = b.getServerByProviderID(node.Spec.ProviderID)
+		_, err = b.getServerByProviderID(ctx, node.Spec.ProviderID)
 	}
 
 	if err == cloudprovider.InstanceNotFound {
@@ -290,9 +290,9 @@ func (b *baremetal) InstanceShutdown(ctx context.Context, node *v1.Node) (bool, 
 	var err error
 
 	if node.Spec.ProviderID == "" {
-		bm, err = b.getServerByName(node.Name)
+		bm, err = b.getServerByName(ctx, node.Name)
 	} else {
-		bm, err = b.getServerByProviderID(node.Spec.ProviderID)
+		bm, err = b.getServerByProviderID(ctx, node.Spec.ProviderID)
 	}
 
 	if err != nil {
@@ -315,16 +315,16 @@ func (b *baremetal) InstanceMetadata(ctx context.Context, node *v1.Node) (*cloud
 	var err error
 
 	if node.Spec.ProviderID == "" {
-		bm, err = b.getServerByName(node.Name)
+		bm, err = b.getServerByName(ctx, node.Name)
 	} else {
-		bm, err = b.getServerByProviderID(node.Spec.ProviderID)
+		bm, err = b.getServerByProviderID(ctx, node.Spec.ProviderID)
 	}
 
 	if err != nil {
 		return nil, err
 	}
 
-	offerName, err := b.getServerOfferName(bm)
+	offerName, err := b.getServerOfferName(ctx, bm)
 	if err != nil {
 		return nil, err
 	}
