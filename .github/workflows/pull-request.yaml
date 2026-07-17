@@ -15,7 +15,7 @@ jobs:
     - name: checkout
       uses: actions/checkout@v7
     - name: Install Go
-      uses: actions/setup-go@v6
+      uses: actions/setup-go@v7
       with:
         go-version: ${{ matrix.go-version }}
     - name: Run unit tests
@@ -32,7 +32,7 @@ jobs:
     - name: checkout
       uses: actions/checkout@v7
     - name: Install Go
-      uses: actions/setup-go@v6
+      uses: actions/setup-go@v7
       with:
         go-version: ${{ matrix.go-version }}
     - name: Building binary
