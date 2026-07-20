@@ -662,17 +662,6 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 		}
 	}
 
-	// Remove extra backends
-	for _, b := range backendsOps.remove {
-		klog.V(3).Infof("deleting backend: %s port: %d loadbalancer: %s", b.ID, b.ForwardPort, loadbalancer.ID)
-		if err := l.api.DeleteBackend(&scwlb.ZonedAPIDeleteBackendRequest{
-			Zone:      loadbalancer.Zone,
-			BackendID: b.ID,
-		}); err != nil {
-			return fmt.Errorf("failed deleting backend: %s port: %d loadbalancer: %s err: %v", b.ID, b.ForwardPort, loadbalancer.ID, err)
-		}
-	}
-
 	for _, port := range service.Spec.Ports {
 		var backend *scwlb.Backend
 		// Update backend
@@ -776,6 +765,18 @@ func (l *loadbalancers) updateLoadBalancer(ctx context.Context, loadbalancer *sc
 					return fmt.Errorf("failed creating ACL %s for frontend: %s port: %d loadbalancer: %s err: %v", acl.Name, frontend.ID, frontend.InboundPort, loadbalancer.ID, err)
 				}
 			}
+		}
+	}
+
+	// Remove extra backends. This must happen after frontends have been rewired above,
+	// since a backend cannot be deleted while still referenced by a frontend.
+	for _, b := range backendsOps.remove {
+		klog.V(3).Infof("deleting backend: %s port: %d loadbalancer: %s", b.ID, b.ForwardPort, loadbalancer.ID)
+		if err := l.api.DeleteBackend(&scwlb.ZonedAPIDeleteBackendRequest{
+			Zone:      loadbalancer.Zone,
+			BackendID: b.ID,
+		}); err != nil {
+			return fmt.Errorf("failed deleting backend: %s port: %d loadbalancer: %s err: %v", b.ID, b.ForwardPort, loadbalancer.ID, err)
 		}
 	}
 
@@ -1183,8 +1184,11 @@ func servicePortToFrontend(service *v1.Service, loadbalancer *scwlb.LB, port v1.
 	}
 
 	return &scwlb.Frontend{
-		Name:                fmt.Sprintf("%s_%s_%d", string(service.UID), strings.ToLower(string(port.Protocol)), port.Port),
-		InboundPort:         port.Port,
+		Name:        fmt.Sprintf("%s_%s_%d", string(service.UID), strings.ToLower(string(port.Protocol)), port.Port),
+		InboundPort: port.Port,
+		// Backend is a stub carrying only the desired ForwardPort, used by frontendEquals
+		// to detect a frontend still wired to a stale backend (e.g. after a NodePort change).
+		Backend:             &scwlb.Backend{ForwardPort: port.NodePort},
 		TimeoutClient:       &timeoutClient,
 		ConnectionRateLimit: connectionRateLimit,
 		CertificateIDs:      certificateIDs,
@@ -1441,6 +1445,10 @@ func frontendEquals(got, want *scwlb.Frontend) bool {
 	}
 	if got.InboundPort != want.InboundPort {
 		klog.V(3).Infof("frontend.InboundPort: %d - %d", got.InboundPort, want.InboundPort)
+		return false
+	}
+	if !backendForwardPortEqual(got.Backend, want.Backend) {
+		klog.V(3).Infof("frontend.Backend.ForwardPort: %v - %v", got.Backend, want.Backend)
 		return false
 	}
 	if !durationPtrEqual(got.TimeoutClient, want.TimeoutClient) {
@@ -1896,6 +1904,18 @@ func uint32PtrEqual(got, want *uint32) bool {
 		return false
 	}
 	return *got == *want
+}
+
+// backendForwardPortEqual returns true if both backends are nil, or if both are
+// non-nil and reference the same ForwardPort
+func backendForwardPortEqual(got, want *scwlb.Backend) bool {
+	if got == nil && want == nil {
+		return true
+	}
+	if got == nil || want == nil {
+		return false
+	}
+	return got.ForwardPort == want.ForwardPort
 }
 
 // chunkArray takes an array and split it in chunks of a given size

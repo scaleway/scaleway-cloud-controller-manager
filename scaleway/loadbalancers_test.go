@@ -399,6 +399,7 @@ func TestServicePortToFrontend(t *testing.T) {
 			&scwlb.Frontend{
 				Name:           "uid_tcp_1234",
 				InboundPort:    1234,
+				Backend:        &scwlb.Backend{ForwardPort: 0},
 				TimeoutClient:  &defaultTimeout,
 				CertificateIDs: []string{},
 			},
@@ -417,6 +418,7 @@ func TestServicePortToFrontend(t *testing.T) {
 			&scwlb.Frontend{
 				Name:           "uid_tcp_1234",
 				InboundPort:    1234,
+				Backend:        &scwlb.Backend{ForwardPort: 0},
 				TimeoutClient:  &otherTimeout,
 				CertificateIDs: []string{},
 			},
@@ -435,6 +437,7 @@ func TestServicePortToFrontend(t *testing.T) {
 			&scwlb.Frontend{
 				Name:           "uid_tcp_1234",
 				InboundPort:    1234,
+				Backend:        &scwlb.Backend{ForwardPort: 0},
 				TimeoutClient:  &defaultTimeout,
 				CertificateIDs: []string{"uid-1"},
 			},
@@ -453,6 +456,7 @@ func TestServicePortToFrontend(t *testing.T) {
 			&scwlb.Frontend{
 				Name:           "uid_tcp_1234",
 				InboundPort:    1234,
+				Backend:        &scwlb.Backend{ForwardPort: 0},
 				TimeoutClient:  &defaultTimeout,
 				CertificateIDs: []string{"uid-1"},
 			},
@@ -471,6 +475,7 @@ func TestServicePortToFrontend(t *testing.T) {
 			&scwlb.Frontend{
 				Name:           "uid_tcp_1234",
 				InboundPort:    1234,
+				Backend:        &scwlb.Backend{ForwardPort: 0},
 				TimeoutClient:  &defaultTimeout,
 				CertificateIDs: []string{"uid-1"},
 			},
@@ -489,6 +494,7 @@ func TestServicePortToFrontend(t *testing.T) {
 			&scwlb.Frontend{
 				Name:           "uid_tcp_1234",
 				InboundPort:    1234,
+				Backend:        &scwlb.Backend{ForwardPort: 0},
 				TimeoutClient:  &defaultTimeout,
 				CertificateIDs: []string{"uid-1", "uid-2"},
 			},
@@ -507,6 +513,7 @@ func TestServicePortToFrontend(t *testing.T) {
 			&scwlb.Frontend{
 				Name:           "uid_tcp_1234",
 				InboundPort:    1234,
+				Backend:        &scwlb.Backend{ForwardPort: 0},
 				TimeoutClient:  &defaultTimeout,
 				CertificateIDs: []string{"uid-1", "uid-2"},
 			},
@@ -525,6 +532,7 @@ func TestServicePortToFrontend(t *testing.T) {
 			&scwlb.Frontend{
 				Name:                "uid_tcp_1234",
 				InboundPort:         1234,
+				Backend:             &scwlb.Backend{ForwardPort: 0},
 				TimeoutClient:       &defaultTimeout,
 				CertificateIDs:      []string{},
 				ConnectionRateLimit: func() *uint32 { v := uint32(100); return &v }(),
@@ -544,6 +552,7 @@ func TestServicePortToFrontend(t *testing.T) {
 			&scwlb.Frontend{
 				Name:             "uid_tcp_1234",
 				InboundPort:      1234,
+				Backend:          &scwlb.Backend{ForwardPort: 0},
 				TimeoutClient:    &defaultTimeout,
 				CertificateIDs:   []string{},
 				EnableAccessLogs: true,
@@ -563,6 +572,7 @@ func TestServicePortToFrontend(t *testing.T) {
 			&scwlb.Frontend{
 				Name:           "uid_tcp_1234",
 				InboundPort:    1234,
+				Backend:        &scwlb.Backend{ForwardPort: 0},
 				TimeoutClient:  &defaultTimeout,
 				CertificateIDs: []string{},
 				EnableHTTP3:    true,
@@ -753,6 +763,28 @@ func TestFrontendEquals(t *testing.T) {
 				ID:             "uid-1",
 				Name:           "uid_tcp_1234",
 				InboundPort:    0,
+				TimeoutClient:  &otherTimeout,
+				CertificateIDs: []string{"uid-2", "uid-1"},
+			},
+			false,
+		},
+		{
+			// A frontend still wired to a backend with a stale ForwardPort (e.g. after
+			// the service's NodePort changed) must not be considered equal, otherwise it
+			// never gets rewired before the stale backend is deleted.
+			"with a different backend forward port",
+			&scwlb.Frontend{
+				Name:           "uid_tcp_1234",
+				InboundPort:    1234,
+				Backend:        &scwlb.Backend{ForwardPort: 30001},
+				TimeoutClient:  &otherTimeout,
+				CertificateIDs: []string{"uid-1", "uid-2"},
+			},
+			&scwlb.Frontend{
+				ID:             "uid-1",
+				Name:           "uid_tcp_1234",
+				InboundPort:    1234,
+				Backend:        &scwlb.Backend{ForwardPort: 30002},
 				TimeoutClient:  &otherTimeout,
 				CertificateIDs: []string{"uid-2", "uid-1"},
 			},
