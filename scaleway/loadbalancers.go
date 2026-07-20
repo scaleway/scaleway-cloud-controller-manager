@@ -480,10 +480,19 @@ func (l *loadbalancers) createLoadBalancer(ctx context.Context, service *v1.Serv
 
 	// Attach specific IP if set
 	var ipIDs []string
+	var assignFlexibleIP, assignFlexibleIPv6 bool
 	if !lbPrivate {
 		ipIDs, err = l.getLoadBalancerStaticIPIDs(ctx, service)
 		if err != nil {
 			return nil, err
+		}
+
+		// We must only assign flexible IP(s) if no IP ID is provided.
+		if len(ipIDs) == 0 {
+			assignFlexibleIP, assignFlexibleIPv6, err = getFlexibleIPTypes(service)
+			if err != nil {
+				return nil, fmt.Errorf("invalid value for annotation %s: %w", serviceAnnotationLoadBalancerFlexibleIPTypes, err)
+			}
 		}
 	}
 
@@ -510,9 +519,10 @@ func (l *loadbalancers) createLoadBalancer(ctx context.Context, service *v1.Serv
 		Tags:        tags,
 		IPIDs:       ipIDs,
 		Type:        lbType,
-		// We must only assign a flexible IP if LB is public AND no IP ID is provided.
+		// We must only assign flexible IP(s) if LB is public AND no IP ID is provided.
 		// If IP IDs are provided, there must be at least one IPv4.
-		AssignFlexibleIP:      scw.BoolPtr(!lbPrivate && len(ipIDs) == 0),
+		AssignFlexibleIP:      new(assignFlexibleIP),
+		AssignFlexibleIPv6:    new(assignFlexibleIPv6),
 		SslCompatibilityLevel: sslCompatibilityLevel,
 	}
 	lb, err := l.api.CreateLB(&request, scw.WithContext(ctx))

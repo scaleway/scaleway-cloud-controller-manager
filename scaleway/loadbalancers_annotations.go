@@ -1,6 +1,7 @@
 package scaleway
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"slices"
@@ -253,6 +254,13 @@ const (
 	//	- "<pn-id>,<pn-id>": will attach the two Private Networks to the LB.
 	serviceAnnotationPrivateNetworkIDs = "service.beta.kubernetes.io/scw-loadbalancer-pn-ids"
 
+	// serviceAnnotationLoadBalancerFlexibleIPTypes is the annotation to choose which flexible IP(s) to book for the LB
+	// when it is created and no static IP is provided via service.beta.kubernetes.io/scw-loadbalancer-ip-ids.
+	// The default value is "ipv4" and the possible values are "ipv4" or "ipv4,ipv6".
+	// A flexible IPv4 is always required, an IPv6-only LB is not supported.
+	// This annotation is only used at LB creation and has no effect on an already existing LB.
+	serviceAnnotationLoadBalancerFlexibleIPTypes = "service.beta.kubernetes.io/scw-loadbalancer-flexible-ip-types"
+
 	// serviceAnnotationLoadBalancerHealthCheckFromService is the annotation to use healthCheckNodePort from the service
 	// The possible values are "false", "true" or "*" for all ports or a comma delimited list of the service port
 	// (for instance "80,443"). When enabled for a port, the health check will use the service's healthCheckNodePort
@@ -327,6 +335,32 @@ func getIPIDs(service *v1.Service) []string {
 	}
 
 	return strings.Split(ipIDs, ",")
+}
+
+// getFlexibleIPTypes returns whether a flexible IPv4 and/or a flexible IPv6 should be
+// booked for the LB, based on the serviceAnnotationLoadBalancerFlexibleIPTypes annotation.
+func getFlexibleIPTypes(service *v1.Service) (assignIPv4 bool, assignIPv6 bool, err error) {
+	flexibleIPTypes := service.Annotations[serviceAnnotationLoadBalancerFlexibleIPTypes]
+	if flexibleIPTypes == "" {
+		return true, false, nil
+	}
+
+	for ipType := range strings.SplitSeq(flexibleIPTypes, ",") {
+		switch strings.ToLower(strings.TrimSpace(ipType)) {
+		case "ipv4":
+			assignIPv4 = true
+		case "ipv6":
+			assignIPv6 = true
+		default:
+			return false, false, fmt.Errorf("unsupported value %q", strings.ToLower(strings.TrimSpace(ipType)))
+		}
+	}
+
+	if !assignIPv4 {
+		return false, false, errors.New("an IPv4 is always required")
+	}
+
+	return assignIPv4, assignIPv6, nil
 }
 
 func getPrivateIPIDs(service *v1.Service) sets.Set[string] {
