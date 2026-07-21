@@ -2185,6 +2185,107 @@ func TestGetSSLCompatibilityLevel(t *testing.T) {
 	}
 }
 
+func TestGetFlexibleIPTypes(t *testing.T) {
+	matrix := []struct {
+		name     string
+		service  *v1.Service
+		wantIPv4 bool
+		wantIPv6 bool
+		wantErr  bool
+	}{
+		{
+			"with no annotation",
+			&v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{},
+				},
+			},
+			true,
+			false,
+			false,
+		},
+		{
+			"with ipv4",
+			&v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"service.beta.kubernetes.io/scw-loadbalancer-flexible-ip-types": "ipv4",
+					},
+				},
+			},
+			true,
+			false,
+			false,
+		},
+		{
+			"with ipv6 only (unsupported)",
+			&v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"service.beta.kubernetes.io/scw-loadbalancer-flexible-ip-types": "ipv6",
+					},
+				},
+			},
+			false,
+			false,
+			true,
+		},
+		{
+			"with ipv4,ipv6",
+			&v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"service.beta.kubernetes.io/scw-loadbalancer-flexible-ip-types": "ipv4,ipv6",
+					},
+				},
+			},
+			true,
+			true,
+			false,
+		},
+		{
+			"with spaces and uppercase values",
+			&v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"service.beta.kubernetes.io/scw-loadbalancer-flexible-ip-types": "IPV4, IPV6",
+					},
+				},
+			},
+			true,
+			true,
+			false,
+		},
+		{
+			"with invalid value",
+			&v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"service.beta.kubernetes.io/scw-loadbalancer-flexible-ip-types": "invalid",
+					},
+				},
+			},
+			false,
+			false,
+			true,
+		},
+	}
+
+	for _, tt := range matrix {
+		t.Run(tt.name, func(t *testing.T) {
+			gotIPv4, gotIPv6, err := getFlexibleIPTypes(tt.service)
+			if tt.wantErr != (err != nil) {
+				t.Errorf("got error: %s, expected: %v", err, tt.wantErr)
+				return
+			}
+
+			if gotIPv4 != tt.wantIPv4 || gotIPv6 != tt.wantIPv6 {
+				t.Errorf("want: (%v, %v), got: (%v, %v)", tt.wantIPv4, tt.wantIPv6, gotIPv4, gotIPv6)
+			}
+		})
+	}
+}
+
 func Test_ipMode(t *testing.T) {
 	type args struct {
 		service *v1.Service

@@ -229,6 +229,16 @@ The possible formats are:
 - `<ip-id>`: will attach a single IP to the LB.
 - `<ip-id>,<ip-id>`: will attach the two IPs to the LB.
 
+### `service.beta.kubernetes.io/scw-loadbalancer-flexible-ip-types`
+
+This is the annotation to choose which flexible IP(s) to book when the LB is created.
+It is a comma delimited list of IP types. The default value is `ipv4` and the possible
+values are `ipv4` or `ipv4,ipv6`.
+A flexible IPv4 is always required, an IPv6-only LB is not supported.
+This annotation is only taken into account at LB creation, and has no effect on an
+already existing LB. It is ignored if `service.beta.kubernetes.io/scw-loadbalancer-ip-ids`
+is set, since in that case the provided IP(s) are used instead of booking new ones.
+
 ### `service.beta.kubernetes.io/scw-loadbalancer-private-ip-ids`
 
 This is the annotation to statically set the private IPs of the loadbalancer.
