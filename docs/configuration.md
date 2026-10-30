@@ -37,6 +37,9 @@ traffic to nodes. Can be overridden per-service with the
 [`service.beta.kubernetes.io/scw-loadbalancer-pn-ids`](loadbalancer-annotations.md#servicebetakubernetesioscw-loadbalancer-pn-ids)
 annotation.
 
+Nodes report the IPs of all their private NICs as internal addresses, regardless of this variable,
+except private NICs tagged `ccm-skip-interface`, which are ignored.
+
 ### `LB_DEFAULT_TYPE`
 The default load balancer commercial offer type (e.g. `LB-S`, `LB-GP-M`) used when creating new
 load balancers. Can be overridden per-service with the
