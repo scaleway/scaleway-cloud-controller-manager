@@ -188,6 +188,26 @@ func newFakeInstanceAPI() *fakeInstanceAPI {
 					},
 				},
 			},
+			// a server with a private NIC tagged to be skipped
+			"skip-interface-server-id": {
+				Zone:           "fr-par-2",
+				Name:           "scw-skip-interface",
+				CommercialType: "PLAY2-NANO",
+				State:          scwinstance.ServerStateRunning,
+				Project:        "test-project",
+				PrivateNics: []*scwinstance.PrivateNIC{
+					{
+						ID:               "nic-skip-interface",
+						PrivateNetworkID: "pn-67890",
+						Tags:             []string{"ccm-skip-interface"},
+					},
+					{
+						ID:               "nic-private-only",
+						PrivateNetworkID: "pn-12345",
+						Tags:             []string{"other"},
+					},
+				},
+			},
 		},
 	}
 }
@@ -244,6 +264,12 @@ func newFakeIPAMAPI() *fakeIPAMAPI {
 			"nic-both-networks": {
 				{
 					Address: scw.IPNet{IPNet: net.IPNet{IP: net.ParseIP("10.200.0.10"), Mask: net.CIDRMask(20, 32)}},
+				},
+			},
+			// IPs for a private NIC tagged to be skipped
+			"nic-skip-interface": {
+				{
+					Address: scw.IPNet{IPNet: net.IPNet{IP: net.ParseIP("172.16.0.5"), Mask: net.CIDRMask(24, 32)}},
 				},
 			},
 			// IPs for another private network
@@ -704,7 +730,7 @@ func TestInstances_PrivateNetworkAddresses(t *testing.T) {
 	})
 
 	t.Run("PrivateNetworkOnly_WithPNID", func(t *testing.T) {
-		// When pnID is configured, only look for that specific private network
+		// When pnID is configured and matches the server's private network, its IP is returned
 		instance := newFakeInstancesWithPNID("pn-12345")
 
 		expectedAddresses := []v1.NodeAddress{
@@ -751,15 +777,30 @@ func TestInstances_PrivateNetworkAddresses(t *testing.T) {
 
 	t.Run("MultiplePrivateNetworks_WithPNID", func(t *testing.T) {
 		// Server with multiple private networks, specific pnID configured
-		// Should only return IPs from the configured private network
+		// Should still return IPs from all private networks
 		instance := newFakeInstancesWithPNID("pn-67890")
 
 		expectedAddresses := []v1.NodeAddress{
 			{Type: v1.NodeHostName, Address: "scw-multi-pn"},
+			{Type: v1.NodeInternalIP, Address: "10.200.0.5"},
 			{Type: v1.NodeInternalIP, Address: "192.168.1.5"},
 		}
 
 		returnedAddresses, err := instance.NodeAddressesByProviderID(context.TODO(), "scaleway://instance/fr-par-2/multi-pn-server-id")
+		AssertNoError(t, err)
+		Equals(t, expectedAddresses, returnedAddresses)
+	})
+
+	t.Run("SkipInterfacePrivateNICIgnored", func(t *testing.T) {
+		// Private NICs tagged ccm-skip-interface must not be reported as internal IPs
+		instance := newFakeInstances()
+
+		expectedAddresses := []v1.NodeAddress{
+			{Type: v1.NodeHostName, Address: "scw-skip-interface"},
+			{Type: v1.NodeInternalIP, Address: "10.200.0.5"},
+		}
+
+		returnedAddresses, err := instance.NodeAddressesByProviderID(context.TODO(), "scaleway://instance/fr-par-2/skip-interface-server-id")
 		AssertNoError(t, err)
 		Equals(t, expectedAddresses, returnedAddresses)
 	})

@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	scwinstance "github.com/scaleway/scaleway-sdk-go/api/instance/v1"
 	scwipam "github.com/scaleway/scaleway-sdk-go/api/ipam/v1"
@@ -203,9 +204,12 @@ func (i *instances) instanceAddresses(ctx context.Context, server *scwinstance.S
 	return addresses, nil
 }
 
-// getPrivateNetworkAddresses returns private network IPs for the server.
-// If pnID is configured, it only looks up IPs for that specific private network.
-// If pnID is not configured, it iterates through all private NICs and returns all found IPs.
+// skipInterfacePrivateNICTag marks private NICs whose IPs must not be reported
+// as node internal IPs (e.g. NICs carrying pod IPs).
+const skipInterfacePrivateNICTag = "ccm-skip-interface"
+
+// getPrivateNetworkAddresses returns private network IPs for the server,
+// ignoring private NICs tagged with skipInterfacePrivateNICTag.
 func (i *instances) getPrivateNetworkAddresses(ctx context.Context, server *scwinstance.Server) ([]v1.NodeAddress, error) {
 	if len(server.PrivateNics) == 0 {
 		return nil, nil
@@ -217,24 +221,10 @@ func (i *instances) getPrivateNetworkAddresses(ctx context.Context, server *scwi
 	}
 
 	var addresses []v1.NodeAddress
-
-	// If a specific private network ID is configured, only look for that one
-	if i.pnID != "" {
-		for _, pNIC := range server.PrivateNics {
-			if pNIC.PrivateNetworkID == i.pnID {
-				nicAddresses, err := i.getIPsForPrivateNIC(ctx, server, pNIC, region)
-				if err != nil {
-					return nil, err
-				}
-				return nicAddresses, nil
-			}
-		}
-		// Configured pnID not found in server's private NICs
-		return nil, nil
-	}
-
-	// No specific pnID configured - iterate through all private NICs
 	for _, pNIC := range server.PrivateNics {
+		if slices.Contains(pNIC.Tags, skipInterfacePrivateNICTag) {
+			continue
+		}
 		nicAddresses, err := i.getIPsForPrivateNIC(ctx, server, pNIC, region)
 		if err != nil {
 			klog.Warningf("failed to query IPAM for node %s: %v", server.Name, err)
