@@ -17,7 +17,9 @@ limitations under the License.
 package scaleway
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -2955,5 +2957,88 @@ func TestServiceToLB_UDPPortsIgnored(t *testing.T) {
 	}
 	if len(backends) != 1 {
 		t.Errorf("expected 1 backend, got %d", len(backends))
+	}
+}
+
+func Test_getLoadBalancerID(t *testing.T) {
+	const lbUUID = "11111111-1111-1111-1111-11111111111a"
+
+	tests := []struct {
+		name       string
+		annotation *string
+		wantZone   scw.Zone
+		wantID     string
+		wantErr    error
+	}{
+		{name: "missing annotation", wantErr: errLoadBalancerInvalidAnnotation},
+		{name: "zone and uuid", annotation: ptr.To("fr-par-1/" + lbUUID), wantZone: scw.ZoneFrPar1, wantID: lbUUID},
+		{name: "region and uuid", annotation: ptr.To("fr-par/" + lbUUID), wantZone: scw.ZoneFrPar1, wantID: lbUUID},
+		{name: "uppercase", annotation: ptr.To("FR-PAR-2/11111111-1111-1111-1111-11111111111A"), wantZone: scw.ZoneFrPar2, wantID: lbUUID},
+		{name: "not a uuid", annotation: ptr.To("fr-par-1/fake-lb-id"), wantErr: errLoadBalancerInvalidLoadBalancerID},
+		{name: "missing zone", annotation: ptr.To(lbUUID), wantErr: errLoadBalancerInvalidLoadBalancerID},
+		{name: "empty", annotation: ptr.To(""), wantErr: errLoadBalancerInvalidLoadBalancerID},
+		{name: "too many parts", annotation: ptr.To("fr-par-1/" + lbUUID + "/x"), wantErr: errLoadBalancerInvalidLoadBalancerID},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := &v1.Service{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}}
+			if tt.annotation != nil {
+				svc.Annotations[serviceAnnotationLoadBalancerID] = *tt.annotation
+			}
+
+			zone, id, err := getLoadBalancerID(svc)
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("expected error %v, got %v", tt.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if zone != tt.wantZone || id != tt.wantID {
+				t.Errorf("got %s/%s, want %s/%s", zone, id, tt.wantZone, tt.wantID)
+			}
+		})
+	}
+}
+
+// An invalid load balancer ID can never match an existing load balancer:
+//   - cleanup (GetLoadBalancer + EnsureLoadBalancerDeleted) must succeed, otherwise the
+//     finalizer is never removed and the service controller keeps retrying the deletion of
+//     its cached copy of the service, blocking a service recreated with the same name;
+//   - EnsureLoadBalancer must return a clear error and must not create a load balancer.
+func TestInvalidLoadBalancerID(t *testing.T) {
+	for _, externallyManaged := range []string{"false", "true"} {
+		t.Run("externally-managed="+externallyManaged, func(t *testing.T) {
+			// api is nil: any call to the Scaleway API panics and fails the test.
+			l := &loadbalancers{}
+
+			svc := &v1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "demo-nginx",
+					Namespace: "default",
+					Annotations: map[string]string{
+						serviceAnnotationLoadBalancerID:                "fr-par-1/fake-lb-id",
+						serviceAnnotationLoadBalancerExternallyManaged: externallyManaged,
+					},
+				},
+				Spec: v1.ServiceSpec{Type: v1.ServiceTypeLoadBalancer},
+			}
+
+			status, exists, err := l.GetLoadBalancer(context.Background(), "", svc)
+			if err != nil || exists || status != nil {
+				t.Errorf("GetLoadBalancer: got (%v, %v, %v), want (nil, false, nil)", status, exists, err)
+			}
+
+			if err := l.EnsureLoadBalancerDeleted(context.Background(), "", svc); err != nil {
+				t.Errorf("EnsureLoadBalancerDeleted: unexpected error: %v", err)
+			}
+
+			if _, err := l.EnsureLoadBalancer(context.Background(), "", svc, nil); !errors.Is(err, errLoadBalancerInvalidLoadBalancerID) {
+				t.Errorf("EnsureLoadBalancer: expected %v, got %v", errLoadBalancerInvalidLoadBalancerID, err)
+			}
+		})
 	}
 }
