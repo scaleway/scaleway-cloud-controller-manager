@@ -276,7 +276,11 @@ func getLoadBalancerID(service *v1.Service) (scw.Zone, string, error) {
 
 	splitLoadBalancerID := strings.Split(strings.ToLower(annoLoadBalancerID), "/")
 	if len(splitLoadBalancerID) != 2 {
-		return "", "", errLoadBalancerInvalidLoadBalancerID
+		return "", "", fmt.Errorf("%w: expected <zone>/<uuid>, got %q", errLoadBalancerInvalidLoadBalancerID, annoLoadBalancerID)
+	}
+
+	if !validation.IsUUID(splitLoadBalancerID[1]) {
+		return "", "", fmt.Errorf("%w: %q is not a valid UUID", errLoadBalancerInvalidLoadBalancerID, splitLoadBalancerID[1])
 	}
 
 	if validation.IsRegion(splitLoadBalancerID[0]) {

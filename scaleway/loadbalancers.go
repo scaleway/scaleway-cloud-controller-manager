@@ -111,6 +111,13 @@ func (l *loadbalancers) GetLoadBalancer(ctx context.Context, _ string, service *
 			return nil, false, nil
 		}
 
+		// An invalid load balancer ID can never match an existing load balancer.
+		// Report it as missing so that cleanup (finalizer removal) is not blocked forever.
+		if errors.Is(err, errLoadBalancerInvalidLoadBalancerID) {
+			klog.Warningf("service %s/%s has an invalid load balancer ID, considering load balancer as not found: %v", service.Namespace, service.Name, err)
+			return nil, false, nil
+		}
+
 		klog.Errorf("error getting load balancer for service %s/%s: %v", service.Namespace, service.Name, err)
 		return nil, false, err
 	}
@@ -248,7 +255,15 @@ func (l *loadbalancers) EnsureLoadBalancerDeleted(ctx context.Context, _ string,
 
 	lb, err := l.fetchLoadBalancer(ctx, service)
 	if err != nil {
-		if err == LoadBalancerNotFound {
+		if errors.Is(err, LoadBalancerNotFound) {
+			return nil
+		}
+
+		// An invalid load balancer ID can never match an existing load balancer,
+		// there is nothing to delete. Returning an error here would block the
+		// service deletion (and the recreation of a service with the same name) forever.
+		if errors.Is(err, errLoadBalancerInvalidLoadBalancerID) {
+			klog.Warningf("service %s/%s has an invalid load balancer ID, nothing to delete: %v", service.Namespace, service.Name, err)
 			return nil
 		}
 
